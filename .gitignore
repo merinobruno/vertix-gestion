@@ -1,0 +1,16 @@
+node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+.vercel
+.env*
+
+# The reusable templates are the only office documents distributed with the app.
+*.doc
+*.docx
+!templates/*.docx
+*.xls
+*.xlsx
+*.pdf
+*.zip
+*.ogg

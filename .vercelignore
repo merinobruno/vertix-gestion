@@ -1,0 +1,16 @@
+.git
+.venv
+__pycache__
+node_modules
+.env
+.env.*
+prepare_*.py
+test_*.py
+*.doc
+*.docx
+!templates/*.docx
+*.xls
+*.xlsx
+*.pdf
+*.zip
+*.ogg

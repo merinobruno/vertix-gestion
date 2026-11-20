@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f2f5fc">
+  <title>Panel documental · Nueva operación</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar"><div class="top-inner">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#m3-stacks"></use></svg></span>Panel documental</div>
+  </div></header>
+  <main class="shell">
+    <div class="intro">
+      <h1>Nueva operación</h1>
+      <md-outlined-button id="example" type="button"><svg slot="icon" class="icon" aria-hidden="true"><use href="#m3-science"></use></svg>Cargar ejemplo</md-outlined-button>
+    </div>
+    <form id="operation" novalidate>
+      <div class="layout"><div class="flow">
+        <section class="card doc-card" aria-labelledby="selection-title">
+          <h2 id="selection-title">Documentos</h2>
+          <div class="doc-grid">
+            <label class="doc-option"><md-checkbox name="documents" value="mutuo" checked aria-label="Mutuo" touch-target="wrapper"></md-checkbox><span>Mutuo</span></label>
+            <label class="doc-option"><md-checkbox name="documents" value="pagares" checked aria-label="Pagarés" touch-target="wrapper"></md-checkbox><span>Pagarés</span></label>
+            <label class="doc-option"><md-checkbox name="documents" value="cesion" checked aria-label="Cesión de cheques" touch-target="wrapper"></md-checkbox><span>Cesión de cheques</span></label>
+          </div>
+        </section>
+        <section class="card form-card" aria-label="Carga de la operación">
+          <md-tabs id="form-tabs" aria-label="Secciones del formulario">
+            <md-primary-tab id="tab-datos" aria-controls="datos" inline-icon active><svg slot="icon" class="icon" aria-hidden="true"><use href="#m3-tune"></use></svg>Operación</md-primary-tab>
+            <md-primary-tab id="tab-partes" aria-controls="partes" inline-icon><svg slot="icon" class="icon" aria-hidden="true"><use href="#m3-groups"></use></svg>Partes</md-primary-tab>
+            <md-primary-tab id="tab-valores" aria-controls="valores" inline-icon><svg slot="icon" class="icon" aria-hidden="true"><use href="#m3-payments"></use></svg><span id="values-tab-label">Cheques y cuotas</span></md-primary-tab>
+          </md-tabs>
+          <div id="panel-stage" class="panel-stage">
+            <div class="tab-body" id="datos" role="tabpanel" aria-labelledby="tab-datos">
+              <div class="field-grid">
+                <div class="native-field"><label class="date-field"><span>Fecha de emisión</span><input type="date" name="issue_date" required></label></div>
+                <md-outlined-text-field label="Lugar de emisión" name="place" placeholder="Ciudad y provincia" pattern=".{0,180}" required></md-outlined-text-field>
+                <md-outlined-select label="Moneda" name="currency">
+                  <md-select-option value="ARS" selected><div slot="headline">Pesos argentinos (ARS)</div></md-select-option>
+                  <md-select-option value="USD"><div slot="headline">Dólares estadounidenses (USD)</div></md-select-option>
+                </md-outlined-select>
+                <md-outlined-select data-condition="requestedNotes" label="Modalidad de pagaré" name="note_mode">
+                  <md-select-option value="installments" selected><div slot="headline">Por cuota</div></md-select-option>
+                  <md-select-option value="demand"><div slot="headline">A la vista (modelo del correo)</div></md-select-option>
+                </md-outlined-select>
+                <md-outlined-select data-condition="requestedCredit" label="Forma de pago del mutuo" name="payment_method">
+                  <md-select-option value="cheques" selected><div slot="headline">Cheques electrónicos</div></md-select-option>
+                  <md-select-option value="bank"><div slot="headline">Transferencia bancaria</div></md-select-option>
+                </md-outlined-select>
+                <md-outlined-text-field data-condition="chequeLoan" label="Importe neto entregado" type="number" name="net" min="0.01" max="999999999999.99" step="0.01" inputmode="decimal" required></md-outlined-text-field>
+                <md-outlined-text-field data-condition="bankLoan" label="Capital del préstamo" type="number" name="bank_principal" min="0.01" max="999999999999.99" step="0.01" inputmode="decimal" required></md-outlined-text-field>
+                <md-outlined-text-field data-condition="loan" label="Tasa punitoria mensual (%)" type="number" name="penalty" min="0" step="0.01" inputmode="decimal" required></md-outlined-text-field>
+              </div>
+              <div data-condition="requestedCredit" class="switch-block"><label class="toggle"><md-switch name="guarantor_enabled" aria-label="Con garante"></md-switch>Con garante</label></div>
+              <div class="group" data-condition="bankLoan"><h2>Cuenta de pago</h2><div class="field-grid">
+                <md-outlined-text-field label="Banco" name="bank_name" required></md-outlined-text-field>
+                <md-outlined-text-field label="Tipo de cuenta" name="account_type" value="Cta. Cte." required></md-outlined-text-field>
+                <md-outlined-text-field label="Número de cuenta" name="account_number" required></md-outlined-text-field>
+                <md-outlined-text-field label="CBU" name="cbu" inputmode="numeric" maxlength="22" pattern="[0-9]{22}" required></md-outlined-text-field>
+                <md-outlined-text-field label="Titular, si difiere de la entidad" name="account_holder"></md-outlined-text-field>
+                <md-outlined-text-field label="CUIT de ese titular" name="account_id"></md-outlined-text-field>
+              </div></div>
+            </div>
+            <div class="tab-body" id="partes" role="tabpanel" aria-labelledby="tab-partes" hidden inert>
+              <div class="group" data-condition="loan"><h2>Cliente</h2><div class="field-grid party" role="group" aria-label="Cliente" data-party="client"></div>
+                <div data-condition="bankLoan" class="field-grid" data-treatment="borrower_title"></div>
+                <label class="toggle" data-condition="chequeLoan"><md-switch name="represented" aria-label="Firma un representante"></md-switch>Firma un representante</label>
+                <div class="subgroup" data-condition="rep"><div class="field-grid party" role="group" aria-label="Representante" data-party="representative"></div></div>
+              </div>
+              <div class="group" data-condition="entity"><h2>Entidad</h2><div class="field-grid party" role="group" aria-label="Entidad" data-party="entity"></div></div>
+              <div class="group" data-condition="bankLoan"><h2>Representante de la entidad</h2><div class="field-grid" data-treatment="lender_rep_title">
+                <md-outlined-text-field label="Nombre y apellido" name="lender_rep_name" required></md-outlined-text-field>
+                <md-outlined-text-field label="DNI" name="lender_rep_id" required></md-outlined-text-field>
+              </div></div>
+              <div class="group" data-condition="guaranteeLoan"><h2>Garante</h2><div class="field-grid party" role="group" aria-label="Garante" data-party="guarantor"></div><div class="field-grid" data-treatment="guarantor_title"></div></div>
+              <div class="group" data-condition="notes"><h2>Pagaré</h2>
+                <label class="toggle"><md-switch name="different_beneficiary" aria-label="Beneficiario distinto de la entidad"></md-switch>Beneficiario distinto de la entidad</label>
+                <div class="subgroup" data-condition="beneficiary"><div class="field-grid party" role="group" aria-label="Beneficiario" data-party="beneficiary"></div></div>
+                <label class="toggle"><md-switch name="separate_payment" aria-label="Usar otro domicilio de pago"></md-switch>Usar otro domicilio de pago</label>
+                <div class="subgroup" data-condition="payment"><md-outlined-text-field label="Domicilio de pago" name="payment_address" pattern=".{0,240}" required></md-outlined-text-field></div>
+              </div>
+              <div class="group" data-condition="demand"><h2>Beneficiario del pagaré a la vista</h2>
+                <div class="field-grid"><md-outlined-text-field label="Nombre y apellido" name="demand_payee" pattern=".{0,180}" required></md-outlined-text-field>
+                  <md-outlined-text-field label="DNI" name="demand_id" pattern=".{0,40}" required></md-outlined-text-field></div>
+              </div>
+              <div class="group" data-condition="transfer"><h2>Cesión</h2>
+                <label class="toggle"><md-switch name="different_assignee" aria-label="Cesionario distinto de la entidad"></md-switch>Cesionario distinto de la entidad</label>
+                <div class="subgroup" data-condition="assignee"><div class="field-grid party" role="group" aria-label="Cesionario" data-party="assignee"></div></div>
+              </div>
+            </div>
+            <div class="tab-body" id="valores" role="tabpanel" aria-labelledby="tab-valores" hidden inert>
+              <div class="group" data-condition="credit"><h2>Anexo I</h2>
+                <div class="annex-drop" id="annex-drop"><md-outlined-button type="button" id="choose-annex">Importar Excel</md-outlined-button><span>o arrastrá el archivo .xlsx aquí</span>
+                  <input id="annex-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>
+                <p class="notice" role="status" id="annex-status" hidden></p>
+              </div>
+              <div class="switch-block before" data-condition="linkOption"><label class="toggle"><md-switch name="linked" aria-label="Usar cada cheque como cuota" selected></md-switch>Usar cada cheque como cuota</label></div>
+              <div class="group" data-condition="cheques"><div class="section-line"><h2>Cheques</h2><md-text-button type="button" id="add-cheque"><svg slot="icon" class="icon" aria-hidden="true"><use href="#m3-add"></use></svg>Agregar cheque</md-text-button></div><div id="cheques"></div></div>
+              <div class="group" data-condition="independent"><div class="section-line"><h2>Cuotas</h2><md-text-button type="button" id="add-installment"><svg slot="icon" class="icon" aria-hidden="true"><use href="#m3-add"></use></svg>Agregar cuota</md-text-button></div><div id="installments"></div></div>
+              <div class="group" data-condition="demand"><div class="field-grid">
+                <md-outlined-text-field label="Importe del pagaré a la vista" name="demand_amount" type="number" min="0.01" max="999999999999.99" step="0.01" inputmode="decimal" required></md-outlined-text-field>
+                <md-outlined-text-field label="Concepto del valor recibido" name="demand_consideration" pattern=".{0,240}" required></md-outlined-text-field>
+              </div></div>
+              <p class="notice" id="no-values" hidden>Elegí al menos un documento.</p>
+            </div>
+          </div>
+          <div class="section-actions"><md-text-button type="button" id="previous" hidden>Volver</md-text-button><md-filled-tonal-button type="button" id="next">Siguiente</md-filled-tonal-button></div>
+        </section>
+      </div>
+      <aside class="summary" aria-labelledby="summary-title">
+        <div class="summary-head"><span class="summary-symbol" aria-hidden="true"><svg class="icon"><use href="#m3-summarize"></use></svg></span><h2 id="summary-title">Resumen</h2></div>
+        <div class="summary-body">
+          <dl class="summary-values">
+            <div><dt>Moneda</dt><dd id="sum-currency">ARS</dd></div>
+            <div data-summary="net"><dt id="sum-net-label">Neto entregado</dt><dd id="sum-net">—</dd></div>
+            <div data-summary="cheques"><dt>Total nominal de cheques</dt><dd id="sum-cheques">—</dd></div>
+            <div data-summary="notes"><dt>Total de cuotas</dt><dd id="sum-installments">—</dd></div>
+            <div data-summary="demand" hidden><dt>Pagaré a la vista</dt><dd id="sum-demand">—</dd></div>
+          </dl>
+          <ul id="file-list" aria-label="Documentos incluidos"></ul>
+          <p class="notice draft" id="draft-notice" role="status" hidden></p>
+          <p class="notice" id="note-original" hidden>El segundo pagaré dice «uno (1)» en el cuerpo del original.</p>
+          <fieldset id="format-options" class="format" hidden><legend>Formato</legend><div class="format-options">
+            <label><md-radio name="format" value="docx" checked aria-label="Word"></md-radio>Word</label>
+            <label><md-radio name="format" value="pdf" aria-label="PDF"></md-radio>PDF</label>
+            <label><md-radio name="format" value="both" aria-label="Ambos"></md-radio>Ambos</label>
+          </div></fieldset>
+          <label class="toggle combined-choice"><md-switch name="combined_document" aria-label="Documento único"></md-switch>Documento único</label>
+          <md-filled-button type="submit" id="generate"><svg slot="icon" class="icon" aria-hidden="true"><use href="#m3-download"></use></svg><span id="download-label">Descargar</span></md-filled-button>
+          <div class="notice" id="service-notice" hidden><p>Esta versión del servicio necesita actualizarse para exportar.</p><md-text-button type="button" id="open-service">Continuar en el panel actualizado</md-text-button></div>
+          <p role="status" aria-live="polite" id="status" hidden></p>
+        </div>
+      </aside></div>
+    </form>
+  </main>
+</body>
+</html>
