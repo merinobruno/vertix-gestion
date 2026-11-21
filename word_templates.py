@@ -39,6 +39,12 @@ def xml_bytes(node):
     return etree.tostring(node, encoding="UTF-8", xml_declaration=True, standalone=True)
 
 
+def word_node(name, parent=None, **attributes):
+    tag = f"{{{W}}}{name}"
+    attrs = {f"{{{W}}}{key}": str(value) for key, value in attributes.items()}
+    return etree.Element(tag, attrs) if parent is None else etree.SubElement(parent, tag, attrs)
+
+
 def overwrite(paragraph, spans):
     """Distribute replacements over the source text runs, leaving all XML styles intact."""
     nodes = list(paragraph.iter(T))
@@ -142,8 +148,10 @@ def fill_rows(parent, prototypes, values, empty_lines=()):
         fill(node, value)
         previous = node
     if len(values) == 1:
-        # The printed line remains available for handwriting, as in the source.
-        fill(second, dict.fromkeys(FIELDS, ""))
+        if empty_lines:
+            parent.replace(second, clone(empty_lines[0], identifiers))
+        else:
+            fill(second, dict.fromkeys(FIELDS, ""))
 
 
 TRANSFER_NOTE_STARTS = (13, 23, 33, 43, 52, 62)
@@ -151,10 +159,7 @@ TRANSFER_NOTE_STARTS = (13, 23, 33, 43, 52, 62)
 
 def annex_table(rows):
     """Rebuild only the six printed columns of the source annex image."""
-    def node(name, parent=None, **attributes):
-        attrs = {f"{{{W}}}{key}": str(value) for key, value in attributes.items()}
-        return etree.SubElement(parent, f"{{{W}}}{name}", attrs) if parent is not None else etree.Element(f"{{{W}}}{name}", attrs)
-
+    node = word_node
     table = node("tbl")
     props = node("tblPr", table)
     node("tblW", props, w=5000, type="pct")
@@ -238,7 +243,9 @@ def note_document(index, values, *, bank=False):
 def assignment_document(values, rows):
     parts, doc = open_template("assignment.docx")
     body = doc.find(f"{{{W}}}body")
-    fill_rows(body, list(body)[7:9], rows, list(body)[9:22])
+    table = body.find(f"{{{W}}}tbl")
+    _, first, second, *writing_lines = table.findall(TR)
+    fill_rows(table, (first, second), rows, writing_lines)
     fill(body, values)
     return WordPiece(parts, doc)
 

@@ -83,8 +83,38 @@ class WordModels(unittest.TestCase):
         cells = table.findall(f"{{{W}}}tr")[2].findall(f"{{{W}}}tc")
         self.assertEqual([paragraph_text(c) for c in cells], ["", "12/12/2026", "$120,34"])
         assignment = body(docs["cesion"])
-        self.assertEqual(sum("PRUEBA-" in paragraph_text(p) for p in assignment.iter(P)), 3)
-        self.assertEqual(len(assignment), 34)
+        cheque_rows = assignment.find(f"{{{W}}}tbl").findall(f"{{{W}}}tr")
+        self.assertEqual(len(cheque_rows), 16)  # header and fifteen printable slots
+        self.assertEqual([paragraph_text(c) for c in cheque_rows[3].findall(f"{{{W}}}tc")],
+                         ["PRUEBA-3", "Banco Ficticio", "19/01/2027", "$54.000,23"])
+
+    def test_assignment_fixed_columns_and_handwriting_slots(self):
+        ns = {"w": W}
+        for count in (1, 15, 60):
+            with self.subTest(count=count):
+                data = dict(operation(), documents=["cesion"], currency="USD")
+                bank = "Banco de Prueba con una denominación extensa para el formulario"
+                data["cheques"] = [dict(data["cheques"][0], number=f"CH-{i}", bank=bank,
+                                        amount="123456789012.34") for i in range(count)]
+                table = body(dict(word_documents(parse(data)))["cesion"]).find("w:tbl", ns)
+                rows = table.findall("w:tr", ns)
+                self.assertEqual(len(rows), 1 + max(count, 15))
+                self.assertEqual(table.xpath("w:tblPr/w:tblLayout/@w:type", namespaces=ns), ["fixed"])
+                self.assertEqual(table.xpath("w:tblPr/w:tblBorders/*/@w:val", namespaces=ns), ["nil"] * 6)
+                self.assertIsNotNone(rows[0].find("w:trPr/w:tblHeader", ns))
+                widths = table.xpath("w:tblGrid/w:gridCol/@w:w", namespaces=ns)
+                for i, row in enumerate(rows[:count+1]):
+                    cells = row.findall("w:tc", ns)
+                    expected = (["Cheque Nro.", "Banco", "Vto.", "Importe"] if i == 0 else
+                                [f"CH-{i-1}", bank, "19/12/2026", "U$S123.456.789.012,34"])
+                    self.assertEqual([paragraph_text(c) for c in cells], expected)
+                    self.assertEqual(row.xpath("w:tc/w:tcPr/w:tcW/@w:w", namespaces=ns), widths)
+                    self.assertEqual(row.xpath("w:tc/w:p/w:pPr/w:jc/@w:val", namespaces=ns),
+                                     ["left", "left", "center", "right"])
+                    self.assertIsNone(row.find(".//w:tab", ns))
+                for row in rows[count+1:]:
+                    self.assertEqual(paragraph_text(row), "")
+                    self.assertIsNotNone(row.find(".//w:pBdr/w:bottom", ns))
 
     def test_demand_note_uses_its_own_complete_form_and_no_installments(self):
         data = {"documents": ["pagares"], "note_mode": "demand", "currency": "USD", "format": "docx",

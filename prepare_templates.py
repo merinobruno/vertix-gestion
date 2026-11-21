@@ -8,12 +8,13 @@ form is available. The exported files never include a copy of the filled example
 import argparse
 import hashlib
 import re
+from copy import deepcopy
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from lxml import etree
 
-from word_templates import MARKERS, T, TEMPLATES, TR, W, overwrite, xml_bytes
+from word_templates import MARKERS, T, TEMPLATES, TR, W, overwrite, word_node, xml_bytes
 
 
 def string(node):
@@ -82,6 +83,68 @@ def loan_master(body):
                  *date_fields(text, "end", text.index(" hasta el "))])
 
 
+def format_assignment_table(body):
+    """Replace the legacy tabbed list with the editable cheque table in the master."""
+    heading, first, second, *guides = list(body)[6:22]
+    # The reviewed A4 model has 8504 twips between its margins.
+    widths = (1860, 2840, 1440, 2364)
+    alignments = ("left", "left", "center", "right")
+    table = word_node("tbl")
+    props = word_node("tblPr", table)
+    word_node("tblW", props, w=sum(widths), type="dxa")
+    borders = word_node("tblBorders", props)
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        word_node(edge, borders, val="nil")
+    word_node("tblLayout", props, type="fixed")
+    margins = word_node("tblCellMar", props)
+    for edge in ("top", "left", "bottom", "right"):
+        word_node(edge, margins, w=0, type="dxa")
+    grid = word_node("tblGrid", table)
+    for width in widths:
+        word_node("gridCol", grid, w=width)
+
+    header_style = heading.find(f"{{{W}}}r/{{{W}}}rPr")
+    labels = re.split(r"\s{2,}", string(heading).strip())
+    for source in (heading, first, second):
+        row = word_node("tr", table)
+        row_props = word_node("trPr", row)
+        word_node("cantSplit", row_props)
+        if source is heading:
+            word_node("tblHeader", row_props)
+            fields = [(label, header_style) for label in labels]
+        else:
+            fields = [(t.text, t.getparent().find(f"{{{W}}}rPr")) for t in source.iter(T) if t.text]
+        for (text, style), width, alignment in zip(fields, widths, alignments, strict=True):
+            cell = word_node("tc", row)
+            cp = word_node("tcPr", cell)
+            word_node("tcW", cp, w=width, type="dxa")
+            if alignment == "left":
+                word_node("right", word_node("tcMar", cp), w=100, type="dxa")
+            paragraph = word_node("p", cell)
+            pp = deepcopy(heading.find(f"{{{W}}}pPr"))
+            pp.find(f"{{{W}}}jc").set(f"{{{W}}}val", alignment)
+            paragraph.append(pp)
+            run = word_node("r", paragraph)
+            run.append(deepcopy(style))
+            word_node("t", run).text = text
+
+    for guide in guides:
+        row = word_node("tr", table)
+        cell = word_node("tc", row)
+        cp = word_node("tcPr", cell)
+        word_node("tcW", cp, w=sum(widths), type="dxa")
+        word_node("gridSpan", cp, val=len(widths))
+        # A pencil line across an unused slot, independent of the table borders.
+        pp = word_node("pPr", word_node("p", cell))
+        word_node("bottom", word_node("pBdr", pp), val="single", sz=4, space=0, color="000000")
+        pp.append(deepcopy(guide.find(f"{{{W}}}pPr/{{{W}}}spacing")))
+        pp.append(deepcopy(header_style))
+
+    body.replace(heading, table)
+    for old_line in (first, second, *guides):
+        body.remove(old_line)
+
+
 def assignment_master(body):
     letter_date(body[0])
     mark(body[3], [(71, len(string(body[3]))-1, "beneficiary_name")])
@@ -94,6 +157,7 @@ def assignment_master(body):
         n, b, d, a = lengths
         mark(row, [(0, n, "cheque_number"), (n, n+b, "bank"), (n+b, n+b+d, "short_due"),
                    (n+b+d, n+b+d+1, "symbol"), (n+b+d+1, n+b+d+a, "amount_digits")])
+    format_assignment_table(body)
 
 
 def demand_master(body):
