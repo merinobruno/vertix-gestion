@@ -3,9 +3,11 @@ import {icon} from "./material.js";
 const form = document.querySelector("#operation");
 const byId = (id) => document.getElementById(id);
 const control = (name) => form.elements.namedItem(name);
+const datePickers = new WeakMap();
+const fieldValue = (field) => (datePickers.get(field) || field).value;
 const valueOf = (name) => name === "format"
   ? [...form.querySelectorAll('md-radio[name="format"]')].find(radio => radio.checked)?.value || "docx"
-  : control(name).value;
+  : fieldValue(control(name));
 const checked = (name) => control(name).selected;
 const pages = ["datos", "partes", "valores"];
 const editable = "input, md-outlined-text-field, md-outlined-select";
@@ -33,6 +35,57 @@ function element(tag, props = {}) {
   return Object.assign(document.createElement(tag), props);
 }
 
+function writeField(field, value) {
+  const picker = datePickers.get(field);
+  if (picker) {
+    picker.value = value;
+    field.value = picker.value.split("-").reverse().join("/");
+    field.setCustomValidity("");
+  } else {
+    field.value = value;
+  }
+}
+
+function enableNumericDate(field) {
+  const original = field.value;
+  const label = field.closest("label");
+  const chooseDate = "Abrir calendario de " + label.querySelector("span").textContent.toLowerCase();
+  Object.assign(field, {type:"text", inputMode:"numeric", placeholder:"DD/MM/AAAA", autocomplete:"off"});
+  const picker = element("input", {type:"date", max:"9999-12-31", ariaLabel:chooseDate});
+  datePickers.set(field, picker);
+  const calendar = element("span", {className:"date-calendar"});
+  const trigger = element("button", {type:"button", ariaLabel:chooseDate});
+  trigger.append(icon("calendar"));
+  calendar.append(trigger, picker);
+  label.after(calendar);
+  if (typeof picker.showPicker === "function") {
+    picker.tabIndex = -1;
+    picker.setAttribute("aria-hidden", "true");
+    trigger.addEventListener("click", () => picker.showPicker());
+  } else {
+    trigger.tabIndex = -1;
+    trigger.setAttribute("aria-hidden", "true");
+  }
+  writeField(field, original);
+  field.addEventListener("input", event => {
+    let value = field.value;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      value = value.split("-").reverse().join("/");
+    } else if (field.selectionStart === value.length && !event.inputType?.startsWith("delete")) {
+      // Insert separators as the user appends digits. Leave edits inside the date at their original caret.
+      value = value.replace(/^(\d{2})(\d{1,6})$/, "$1/$2").replace(/^(\d{2}\/\d{2})(\d{1,4})$/, "$1/$2");
+    }
+    if (value !== field.value) field.value = value;
+    const parts = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value);
+    picker.value = parts ? [parts[3], parts[2].padStart(2,"0"), parts[1].padStart(2,"0")].join("-") : "";
+    field.setCustomValidity(value && !picker.value ? "Ingresá una fecha válida en formato DD/MM/AAAA." : "");
+  });
+  field.addEventListener("blur", () => { if (picker.value) writeField(field, picker.value); });
+  for (const event of ["input", "change"]) {
+    picker.addEventListener(event, () => writeField(field, picker.value));
+  }
+}
+
 function appendField(container, caption, node, wide = false) {
   if (node.localName === "input" && node.type === "date") {
     const label = element("label", {className:"date-field"});
@@ -40,6 +93,7 @@ function appendField(container, caption, node, wide = false) {
     const wrapper = element("div",{className:"native-field"});
     wrapper.append(label);
     container.append(wrapper);
+    enableNumericDate(node);
   } else {
     node.label = caption;
     if (wide) node.classList.add("wide");
@@ -251,7 +305,7 @@ function flagsFor(docs) {
 function readRows(kind) {
   return [...byId(kind).querySelectorAll(".row-card:not([data-removing])")].map(row => {
     const info = {};
-    for (const input of row.querySelectorAll("[data-field]")) info[input.dataset.field] = input.value.trim();
+    for (const input of row.querySelectorAll("[data-field]")) info[input.dataset.field] = fieldValue(input).trim();
     if (row.dataset.referenceNote) info.reference_note = row.dataset.referenceNote;
     if (row.dataset.noteFormulaMissing) info.note_formula_missing = true;
     return info;
@@ -306,7 +360,7 @@ let nextErrorId = 0;
 
 function validationMessage(field) {
   const validity = field.validity;
-  if (field.type === "date") return validity.valueMissing ? "Completá la fecha." : "Ingresá una fecha válida.";
+  if (datePickers.has(field)) return validity.valueMissing ? "Completá la fecha." : field.validationMessage;
   if (validity.badInput) return "Ingresá un número válido.";
   if (validity.valueMissing) return field.localName === "md-outlined-select" ? "Elegí una opción." : "Completá este campo.";
   const numbers = new Intl.NumberFormat("es-AR",{maximumFractionDigits:2});
@@ -467,7 +521,7 @@ function sample() {
     demand_payee:"Ada Ejemplo", demand_id:"00.000.001", demand_amount:"2500", demand_consideration:"una operación de ejemplo",
     "client.name":"Comercial de Ejemplo S.A.", "client.id_type":"CUIT", "client.id_number":"00-00000000-0", "client.address":"Calle de Prueba 120, Ciudad Ejemplo",
     "entity.name":"Financiera Ficticia S.A.", "entity.id_type":"CUIT", "entity.id_number":"00-00000001-0", "entity.address":"Avenida de Prueba 40, Ciudad Ejemplo"};
-  for (const [name,value] of Object.entries(sampleFields)) control(name).value = value;
+  for (const [name,value] of Object.entries(sampleFields)) writeField(control(name), value);
   byId("cheques").replaceChildren();
   byId("installments").replaceChildren();
   createRow("cheques",{number:"PRUEBA-001", bank:"Banco Ficticio", due:localDate(30), amount:"52000"});
@@ -590,7 +644,7 @@ function restoreOperation(saved) {
   for (const radio of form.querySelectorAll('md-radio[name="format"]')) radio.checked = radio.value === saved.format;
   for (const key of ["place","issue_date","currency","net","penalty","payment_address","note_mode",
     "demand_payee","demand_id","demand_amount","demand_consideration",...bankFields]) {
-    if (saved[key] != null) control(key).value = saved[key];
+    if (saved[key] != null) writeField(control(key), saved[key]);
   }
   for (const key of ["represented","guarantor_enabled","different_beneficiary","different_assignee","separate_payment","combined_document"]) {
     control(key).selected = Boolean(saved[key]);
@@ -683,7 +737,8 @@ form.addEventListener("submit",async event => {
   }
 });
 
-control("issue_date").value = localDate();
+enableNumericDate(control("issue_date"));
+writeField(control("issue_date"), localDate());
 createRow("cheques");
 createRow("installments");
 showPage(0);

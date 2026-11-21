@@ -20,6 +20,7 @@ import download from "@material-symbols/svg-400/rounded/download.svg";
 import add from "@material-symbols/svg-400/rounded/add.svg";
 import remove from "@material-symbols/svg-400/rounded/delete.svg";
 import summarize from "@material-symbols/svg-400/rounded/summarize.svg";
+import calendar from "@material-symbols/svg-400/rounded/calendar_today.svg";
 
 const face = new FontFace("Roboto", roboto, {weight:"100 900", style:"normal", display:"swap"});
 document.fonts.add(face);
@@ -32,7 +33,7 @@ sprite.setAttribute("aria-hidden", "true");
 sprite.setAttribute("width", "0");
 sprite.setAttribute("height", "0");
 const parser = new DOMParser();
-for (const [name, source] of Object.entries({stacks, science, tune, groups, payments, download, add, "delete":remove, summarize})) {
+for (const [name, source] of Object.entries({stacks, science, tune, groups, payments, download, add, "delete":remove, summarize, calendar})) {
   const original = parser.parseFromString(source, "image/svg+xml").documentElement;
   const symbol = document.createElementNS(namespace, "symbol");
   symbol.id = "m3-" + name;
