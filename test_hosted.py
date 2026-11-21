@@ -5,6 +5,8 @@ from datetime import date
 from importlib.util import find_spec
 from zipfile import ZipFile
 
+from lxml import html
+
 from test_annex import workbook
 from test_word_models import operation
 
@@ -30,6 +32,20 @@ async def request(path, method="GET", *, body=b"", content_type="application/jso
 
 @unittest.skipUnless(find_spec("fastapi"), "Install the hosting dependencies from requirements.txt")
 class HostedPanel(unittest.IsolatedAsyncioTestCase):
+    async def test_importer_downloads_a_usable_template(self):
+        status, _, page = await request("/")
+        self.assertEqual(status, 200)
+        template_link, = html.fromstring(b"".join(page)).xpath('//*[@id="annex-drop"]//a[@download]/@href')
+        status, headers, file_chunks = await request(template_link)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers[b"content-type"], b"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        status, _, response = await request("/api/anexo", "POST", body=b"".join(file_chunks),
+                                            content_type="application/octet-stream")
+        self.assertEqual(status, 200)
+        schedule = json.loads(b"".join(response))
+        self.assertEqual(schedule["principal"], "90000.00")
+        self.assertEqual([row["amount"] for row in schedule["installments"]], ["52000.00", "54000.00"])
+
     async def test_large_zip_arrives_in_chunks_and_opens(self):
         status, headers, chunks = await request("/api/generate", "POST", body=json.dumps(operation()).encode())
         self.assertEqual(status, 200)

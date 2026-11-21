@@ -11,6 +11,7 @@ test_*.py
 !templates/*.docx
 *.xls
 *.xlsx
+!static/plantilla-anexo-i.xlsx
 *.pdf
 *.zip
 *.ogg

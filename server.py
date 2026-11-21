@@ -12,7 +12,8 @@ from panel_api import ApiError, service_info, submit, upload_for
 STATIC = Path(__file__).with_name("static")
 PAGES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/styles.css": ("styles.css", "text/css; charset=utf-8"),
-         "/app.js": ("app.js", "text/javascript; charset=utf-8")}
+         "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+         "/plantilla-anexo-i.xlsx": ("plantilla-anexo-i.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
 
 
 class Panel(BaseHTTPRequestHandler):

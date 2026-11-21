@@ -94,8 +94,14 @@
             </div>
             <div class="tab-body" id="valores" role="tabpanel" aria-labelledby="tab-valores" hidden inert>
               <div class="group" data-condition="credit"><h2>Anexo I</h2>
-                <div class="annex-drop" id="annex-drop"><md-outlined-button type="button" id="choose-annex">Importar Excel</md-outlined-button><span>o arrastrá el archivo .xlsx aquí</span>
-                  <input id="annex-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>
+                <div class="annex-drop" id="annex-drop">
+                  <md-outlined-button type="button" id="choose-annex">Importar Excel</md-outlined-button>
+                  <a class="annex-template" href="/plantilla-anexo-i.xlsx" download>
+                    <svg class="icon" aria-hidden="true"><use href="#m3-download"></use></svg>Descargar plantilla
+                  </a>
+                  <span>También podés arrastrar tu archivo .xlsx aquí.</span>
+                  <input id="annex-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+                </div>
                 <p class="notice" role="status" id="annex-status" hidden></p>
               </div>
               <div class="switch-block before" data-condition="linkOption"><label class="toggle"><md-switch name="linked" aria-label="Usar cada cheque como cuota" selected></md-switch>Usar cada cheque como cuota</label></div>

@@ -11,6 +11,7 @@ __pycache__/
 !templates/*.docx
 *.xls
 *.xlsx
+!static/plantilla-anexo-i.xlsx
 *.pdf
 *.zip
 *.ogg
