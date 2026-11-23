@@ -6,7 +6,7 @@ from zipfile import ZipFile
 
 from lxml import etree
 
-from documents import parse, word_documents
+from documents import parse, word_documents, word_pieces
 from word_templates import P, T, TOKEN, W, XML_SPACE, package
 
 
@@ -55,6 +55,8 @@ class WordModels(unittest.TestCase):
         for index, node in enumerate(list(original)):
             if indexes is not None and index not in indexes and node.tag != f"{{{W}}}sectPr":
                 original.remove(node)
+        for highlight in original.xpath(".//w:highlight[@w:val='yellow']", namespaces={"w": W}):
+            highlight.getparent().remove(highlight)
         self.assertEqual(layout(doc), layout(original))
         for reference, generated in zip(original.iter(P), doc.iter(P), strict=True):
             source, text = paragraph_text(reference), paragraph_text(generated)
@@ -62,6 +64,16 @@ class WordModels(unittest.TestCase):
             self.assertIsNone(TOKEN.search(text))
         with ZipFile(io.BytesIO(output)) as file:
             self.assertFalse(any(p.startswith(("customXml/", "docProps/")) for p in file.namelist()))
+
+    def test_source_highlights_can_be_restored_after_a_clean_export(self):
+        _, piece = next(word_pieces(parse(operation())))
+        source = piece.document.find(f"{{{W}}}body")
+        expected = etree.tostring(source, method="c14n")
+        yellow = ".//w:highlight[@w:val='yellow']"
+        self.assertTrue(source.xpath(yellow, namespaces={"w": W}))
+        self.assertFalse(body(piece.to_docx()).xpath(yellow, namespaces={"w": W}))
+        restored = body(piece.to_docx(include_yellow_highlights=True))
+        self.assertEqual(etree.tostring(restored, method="c14n"), expected)
 
     def test_split_pages_and_assignment_keep_every_fixed_run_and_clause(self):
         documents = dict(word_documents(parse(operation())))

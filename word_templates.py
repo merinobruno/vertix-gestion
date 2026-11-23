@@ -108,8 +108,13 @@ class WordPiece:
     parts: dict
     document: etree._Element
 
-    def to_docx(self):
-        return encode(self.parts, self.document)
+    def to_docx(self, *, include_yellow_highlights=False):
+        document = self.document
+        if not include_yellow_highlights:
+            document = deepcopy(document)
+            for highlight in document.findall(f".//{{{W}}}highlight[@{{{W}}}val='yellow']"):
+                highlight.getparent().remove(highlight)
+        return encode(self.parts, document)
 
 
 def replace_body(document, keep):
