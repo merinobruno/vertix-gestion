@@ -1,6 +1,8 @@
 import {icon} from "./material.js";
-import {attachDirectory} from "./party-directory.js";
+import {attachDirectory, localDirectoryRequest} from "./party-directory.js";
 import {setupAgenda} from "./agenda.js";
+import {addressFields, addressLine} from "./address.js";
+import {browserDirectoryRequest} from "./browser-directory.js";
 import {bindIdentification, identificationProblem, readIdentification, taxKind, writeIdentification} from "./identification.js";
 
 const form = document.querySelector("#operation");
@@ -23,7 +25,7 @@ let changed = false;
 let busy = false;
 let templateService = null;
 let combinedService = null;
-let directoryService = false;
+let directoryBackend = null;
 const directories = [];
 let migrationWindow = null;
 let importRevision = 0;
@@ -31,7 +33,6 @@ let importing = false;
 let importedPrincipal = null;
 const bankFields = ["bank_principal","bank_name","account_type","account_number","cbu","account_holder","account_id",
   "lender_rep_name","lender_rep_id","lender_rep_title","borrower_title","guarantor_title","payment_method"];
-const addressFields = {street:"Calle", number:"Altura", floor:"Piso", apartment:"Departamento", locality:"Localidad", province:"Provincia"};
 const localPanel = location.protocol === "http:" && ["127.0.0.1", "localhost"].includes(location.hostname);
 const companion = localPanel && ["8765", "8766"].includes(location.port) ? new URL("/", location.href) : null;
 if (companion) companion.port = location.port === "8766" ? "8765" : "8766";
@@ -39,6 +40,11 @@ byId("open-service").hidden = !companion;
 
 function element(tag, props = {}) {
   return Object.assign(document.createElement(tag), props);
+}
+
+function directoryRequest(action, payload, signal) {
+  if (!directoryBackend) return Promise.reject(new Error("La Agenda no está disponible."));
+  return directoryBackend(action, payload, signal);
 }
 
 function writeField(field, value) {
@@ -124,7 +130,7 @@ function addAddress(container, prefix, caption, condition) {
 function createParty(group) {
   const key = group.dataset.party;
   const natural = key === "representative" || key === "guarantor";
-  const useDirectory = localPanel && (key === "client" || key === "entity");
+  const useDirectory = key === "client" || key === "entity";
   if (!useDirectory) {
     appendField(group, natural ? "Nombre y apellido" : "Nombre o razón social",
       element("md-outlined-text-field", {name: key + ".name", pattern: ".{0,180}", required: true}), true);
@@ -147,9 +153,10 @@ function createParty(group) {
   }
   if (useDirectory) {
     directories.push(attachDirectory(group, key, {
-      read:() => {
+      directoryRequest,
+      read:(includeHiddenAddress = false) => {
         const party = readParty(key);
-        if (control(key + ".address.street").disabled) delete party.address;
+        if (!includeHiddenAddress && control(key + ".address.street").disabled) delete party.address;
         return party;
       },
       validate:() => validateDirectoryParty(key),
@@ -370,11 +377,6 @@ function readAddress(prefix, owner = form) {
     [key, owner.elements.namedItem(prefix + "." + key).value.trim().replace(/\s+/g, " ")]));
 }
 
-function addressLine({street, number, floor, apartment, locality, province}) {
-  return [[street, number].filter(Boolean).join(" "), floor && "piso " + floor, apartment && "depto. " + apartment,
-    locality, province].filter(Boolean).join(", ");
-}
-
 function readParty(key) {
   const party = {name:valueOf(key + ".name"), ...readIdentification(control(key + ".id_number"))};
   if (key !== "assignee") party.address = readAddress(key + ".address");
@@ -589,7 +591,7 @@ function refresh() {
   for (const field of form.querySelectorAll("[data-reported]")) {
     fieldError(field, field.disabled ? "" : fieldProblem(field));
   }
-  for (const directory of directories) directory.sync(directoryService);
+  for (const directory of directories) directory.sync(Boolean(directoryBackend));
   byId("no-values").hidden = docs.length > 0;
   const notice = byId("draft-notice");
   notice.hidden = docs.length === available.length;
@@ -774,9 +776,13 @@ async function verifyService() {
   const response = await fetch("/api/health", {cache:"no-store"});
   if (!response.ok) throw new Error("No se pudo verificar el servicio.");
   const health = await response.json();
-  directoryService = localPanel && health.service === "panel-documental" && health.party_directory === true && health.directory_editor === true && health.identification_formats === true;
-  setAgendaAvailable(directoryService);
-  const oldLocalService = localPanel && health.pdf_export === true && !directoryService;
+  const currentService = health.service === "panel-documental" && health.identification_formats === true;
+  const localDirectory = localPanel && currentService && health.party_directory === true && health.directory_editor === true;
+  const browserDirectory = currentService && health.browser_directory === true;
+  directoryBackend = localDirectory ? localDirectoryRequest : browserDirectory ? browserDirectoryRequest : null;
+  byId("agenda-storage").hidden = directoryBackend !== browserDirectoryRequest;
+  setAgendaAvailable(Boolean(directoryBackend));
+  const oldLocalService = localPanel && health.pdf_export === true && !localDirectory;
   templateService = health.service === "panel-documental" && health.annex_import === true && health.structured_addresses === true
     && health.identification_formats === true && !oldLocalService;
   combinedService = health.combined_document === true;
@@ -892,7 +898,7 @@ form.addEventListener("submit",async event => {
   }
 });
 
-const setAgendaAvailable = setupAgenda({addAddress, addressFields, fieldProblem, fieldError});
+const setAgendaAvailable = setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest});
 enableNumericDate(control("issue_date"));
 writeField(control("issue_date"), localDate());
 createRow("cheques");
@@ -901,8 +907,8 @@ showPage(0);
 refresh();
 Promise.all([...form.querySelectorAll("md-outlined-select")].map(node => node.updateComplete)).then(async () => {
   refresh();
-  if (await verifyService() && companion && location.hash === "#continuar" && window.opener) {
-    window.opener.postMessage({type:"panel-ready", structured_addresses:true, party_directory:directoryService, directory_editor:directoryService,
+  if (await verifyService() && directoryBackend === localDirectoryRequest && companion && location.hash === "#continuar" && window.opener) {
+    window.opener.postMessage({type:"panel-ready", structured_addresses:true, party_directory:true, directory_editor:true,
       identification_formats:true},companion.origin);
   }
 }).catch(() => statusMessage("No se pudo verificar el servicio. Volvé a intentar.",true));

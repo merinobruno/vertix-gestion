@@ -19,7 +19,7 @@ async def api_error(request, exc):
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health():
-    return JSONResponse(service_info(pdf_export=False), headers=PRIVATE_HEADERS)
+    return JSONResponse(service_info(pdf_export=False, browser_directory=True), headers=PRIVATE_HEADERS)
 
 
 async def download_chunks(data):

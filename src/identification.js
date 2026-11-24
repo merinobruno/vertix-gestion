@@ -146,8 +146,12 @@ export function readIdentification(number) {
 export function identificationProblem(number) {
   const state = bindings.get(number);
   if (!state || !number.value.trim()) return "";
-  const kind = state.type.value || state.fallback;
-  const digits = documentDigits(number.value);
+  return numberProblem(state.type.value || state.fallback, number.value);
+}
+
+export function numberProblem(kind, value) {
+  const digits = documentDigits(value);
   if (kind === "DNI") return /^[0-9]{1,8}$/.test(digits) ? "" : "El DNI debe tener entre 1 y 8 dígitos.";
-  return /^[0-9]{11}$/.test(digits) ? "" : "El CUIT/CUIL debe tener 11 dígitos.";
+  if (identificationGroup(kind) === taxKind) return /^[0-9]{11}$/.test(digits) ? "" : "El CUIT/CUIL debe tener 11 dígitos.";
+  return "Elegí el tipo de identificación.";
 }

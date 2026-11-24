@@ -1,10 +1,29 @@
-import {displayNumber, documentDigits, identificationGroup} from "./identification.js";
+import {displayNumber, documentDigits, identificationGroup, writeIdentification} from "./identification.js";
+import {addressFields} from "./address.js";
+
+function identity(party) {
+  return identificationGroup(party.id_type) + "/" + documentDigits(party.id_number);
+}
+
+export function fieldsFromReplacedParty(previous, current, editingName) {
+  const clean = value => (value || "").trim().replace(/\s+/g, " ");
+  const sameName = clean(current.name) === clean(previous.name);
+  if (editingName ? sameName : identity(current) === identity(previous)) return null;
+  const fields = [];
+  if (editingName) fields.push("id_number");
+  else if (sameName) fields.push("name");
+  for (const key of Object.keys(addressFields)) {
+    const oldValue = clean(previous.address?.[key]);
+    if (oldValue && clean(current.address?.[key]) === oldValue) fields.push("address." + key);
+  }
+  return fields;
+}
 
 function node(tag, properties = {}) {
   return Object.assign(document.createElement(tag), properties);
 }
 
-export async function directoryRequest(action, payload, signal) {
+export async function localDirectoryRequest(action, payload, signal) {
   const response = await fetch("/api/agenda/" + action, {
     method:"POST", headers:{"Content-Type":"application/json"}, cache:"no-store", body:JSON.stringify(payload), signal,
   });
@@ -13,7 +32,7 @@ export async function directoryRequest(action, payload, signal) {
   return result;
 }
 
-export function attachDirectory(group, role, {read, apply, validate}) {
+export function attachDirectory(group, role, {read, apply, validate, directoryRequest}) {
   const noun = role === "client" ? "cliente" : "entidad";
   function lookupField(key, caption, max, wide) {
     const wrapper = node("div", {className:"native-field directory-name" + (wide ? " wide" : "")});
@@ -27,7 +46,8 @@ export function attachDirectory(group, role, {read, apply, validate}) {
   const [idWrapper, number] = lookupField("id_number", "Número de identificación", 40, false);
   number.inputMode = "numeric";
   group.prepend(nameWrapper);
-  group.querySelector('[name$=".id_type"]').after(idWrapper);
+  const type = group.querySelector('[name$=".id_type"]');
+  type.after(idWrapper);
   const list = node("ul", {className:"directory-options", id:"suggestions-" + role, hidden:true});
   list.setAttribute("role", "listbox");
   list.setAttribute("aria-label", "Fichas guardadas");
@@ -53,10 +73,6 @@ export function attachDirectory(group, role, {read, apply, validate}) {
   let anchor = name;
   let saving = false;
   let version = 0;
-
-  function identity(party) {
-    return identificationGroup(party.id_type) + "/" + documentDigits(party.id_number);
-  }
 
   function message(text, error = false) {
     feedback.textContent = text;
@@ -93,7 +109,7 @@ export function attachDirectory(group, role, {read, apply, validate}) {
     close();
     anchor = input;
     const query = input.value.trim();
-    if (!query || !visible()) return;
+    if (!query || query.length > 240 || !visible()) return;
     input.closest(".directory-name").append(list, count);
     const search = new AbortController();
     pending = search;
@@ -116,7 +132,9 @@ export function attachDirectory(group, role, {read, apply, validate}) {
         count.textContent = records.length ? records.length + (records.length === 1 ? " coincidencia." : " coincidencias.") : "Sin coincidencias.";
         if (selectFirst && records.length) highlight(0);
       } catch (error) {
-        if (pending === search && !search.signal.aborted && visible()) message("No se pudo consultar la agenda local.", true);
+        if (pending === search && !search.signal.aborted && visible()) {
+          message(error.message === "Failed to fetch" ? "No se pudo consultar la Agenda." : error.message, true);
+        }
       } finally {
         if (pending === search) pending = null;
       }
@@ -132,11 +150,28 @@ export function attachDirectory(group, role, {read, apply, validate}) {
     message("Ficha cargada.");
   }
 
+  function detachOnChange(input) {
+    if (!selected) return false;
+    const fields = fieldsFromReplacedParty(selected, read(true), input === name);
+    if (!fields) return false;
+    selected = null;
+    version++;
+    close();
+    for (const key of fields) {
+      if (key === "id_number") writeIdentification(number, {id_type:type.value, id_number:""});
+      else group.querySelector('[name="' + role + "." + key + '"]').value = "";
+    }
+    message("Completá los datos o elegí otra ficha.");
+    return true;
+  }
+
   for (const input of [name, number]) {
-    input.addEventListener("input", () => { message(""); lookup(input); });
+    input.addEventListener("input", () => { if (!detachOnChange(input)) message(""); lookup(input); });
+    input.addEventListener("change", () => detachOnChange(input));
     input.addEventListener("blur", close);
     input.addEventListener("keydown", browseSuggestions);
   }
+  type.addEventListener("change", () => detachOnChange(type));
   list.addEventListener("mousedown", event => event.preventDefault());
   list.addEventListener("click", event => {
     const option = event.target.closest('[role="option"]');
@@ -206,7 +241,10 @@ export function attachDirectory(group, role, {read, apply, validate}) {
     }
     if (!visible() && (pending || !list.hidden)) close();
     button.disabled = saving || !enabled || name.disabled;
-    const labelText = (selected && identity(selected) === identity(read()) ? "Actualizar " : "Guardar ") + noun;
+    // Recheck silent browser autofill before validation or export.
+    if (selected && identity(selected) !== identity(read())) detachOnChange(type);
+    else if (selected && name.value !== selected.name) detachOnChange(name);
+    const labelText = (selected ? "Actualizar " : "Guardar ") + noun;
     if (buttonLabel.data !== labelText) buttonLabel.data = labelText;
   }
 

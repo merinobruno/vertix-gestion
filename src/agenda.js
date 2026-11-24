@@ -1,7 +1,6 @@
-import {directoryRequest} from "./party-directory.js";
 import {bindIdentification, displayNumber, readIdentification, taxKind, writeIdentification} from "./identification.js";
 
-export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError}) {
+export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest}) {
   const byId = id => document.getElementById(id);
   const tabs = byId("workspace-tabs");
   const opTab = byId("tab-operation");
@@ -114,7 +113,7 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
         render(parties);
       } catch (error) {
         if (request !== controller) return;
-        status.textContent = "No se pudo consultar la agenda local.";
+        status.textContent = error.message === "Failed to fetch" ? "No se pudo consultar la Agenda." : error.message;
         status.classList.add("failed");
       } finally {
         if (request === controller) request = null;

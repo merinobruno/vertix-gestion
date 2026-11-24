@@ -67,6 +67,9 @@ class HostedPanel(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(health["structured_addresses"])
         self.assertFalse(health["party_directory"])
         self.assertFalse(health["directory_editor"])
+        self.assertTrue(health["browser_directory"])
+        status, _, _ = await request("/api/agenda/list", "POST", body=b"{}")
+        self.assertEqual(status, 405)
         self.assertTrue(health["identification_formats"])
         for path in ("/api/agenda/search", "/api/agenda/save", "/api/agenda/list", "/api/agenda/update"):
             self.assertIn((await request(path, "POST", body=b"{}"))[0], (404, 405))
