@@ -12,8 +12,13 @@
 <body>
   <header class="topbar"><div class="top-inner">
     <div class="brand"><span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#m3-stacks"></use></svg></span>Panel documental</div>
+    <div id="workspace-tabs" class="workspace-tabs" role="tablist" aria-label="Vistas del panel" hidden>
+      <button id="tab-operation" type="button" role="tab" aria-selected="true" aria-controls="operation-view">Nueva operación</button>
+      <button id="tab-agenda" type="button" role="tab" aria-selected="false" aria-controls="agenda-view" tabindex="-1">Agenda</button>
+    </div>
   </div></header>
   <main class="shell">
+    <div id="operation-view">
     <div class="intro">
       <h1>Nueva operación</h1>
       <md-outlined-button id="example" type="button"><svg slot="icon" class="icon" aria-hidden="true"><use href="#m3-science"></use></svg>Cargar ejemplo</md-outlined-button>
@@ -54,6 +59,8 @@
                 <md-outlined-text-field data-condition="chequeLoan" label="Importe neto entregado" type="number" name="net" min="0.01" max="999999999999.99" step="0.01" inputmode="decimal" required></md-outlined-text-field>
                 <md-outlined-text-field data-condition="bankLoan" label="Capital del préstamo" type="number" name="bank_principal" min="0.01" max="999999999999.99" step="0.01" inputmode="decimal" required></md-outlined-text-field>
                 <md-outlined-text-field data-condition="loan" label="Tasa punitoria mensual (%)" type="number" name="penalty" min="0" step="0.01" inputmode="decimal" required></md-outlined-text-field>
+                <div class="wide" data-condition="bankLoan"><md-outlined-button type="button" id="choose-principal-annex">Importar capital y cuotas desde Excel</md-outlined-button>
+                  <p class="notice" role="status" id="principal-annex-status" hidden></p></div>
               </div>
               <div data-condition="requestedCredit" class="switch-block"><label class="toggle"><md-switch name="guarantor_enabled" aria-label="Con garante"></md-switch>Con garante</label></div>
               <div class="group" data-condition="bankLoan"><h2>Cuenta de pago</h2><div class="field-grid">
@@ -81,7 +88,7 @@
                 <label class="toggle"><md-switch name="different_beneficiary" aria-label="Beneficiario distinto de la entidad"></md-switch>Beneficiario distinto de la entidad</label>
                 <div class="subgroup" data-condition="beneficiary"><div class="field-grid party" role="group" aria-label="Beneficiario" data-party="beneficiary"></div></div>
                 <label class="toggle"><md-switch name="separate_payment" aria-label="Usar otro domicilio de pago"></md-switch>Usar otro domicilio de pago</label>
-                <div class="subgroup" data-condition="payment"><md-outlined-text-field label="Domicilio de pago" name="payment_address" pattern=".{0,240}" required></md-outlined-text-field></div>
+                <div class="subgroup" data-condition="payment" id="payment-address"></div>
               </div>
               <div class="group" data-condition="demand"><h2>Beneficiario del pagaré a la vista</h2>
                 <div class="field-grid"><md-outlined-text-field label="Nombre y apellido" name="demand_payee" pattern=".{0,180}" required></md-outlined-text-field>
@@ -142,6 +149,37 @@
         </div>
       </aside></div>
     </form>
+    </div>
+    <section id="agenda-view" role="tabpanel" aria-labelledby="tab-agenda" hidden>
+      <div class="intro"><h1>Agenda</h1></div>
+      <div id="agenda-browse" class="card agenda-card">
+        <label class="agenda-search">Buscar
+          <input id="agenda-search" type="search" placeholder="Nombre, razón social, CUIT, CUIL o DNI" autocomplete="off">
+        </label>
+        <p id="agenda-feedback" role="status" hidden></p>
+        <p id="agenda-status" role="status" aria-live="polite"></p>
+        <ul id="agenda-list" aria-label="Fichas de clientes y entidades"></ul>
+        <div id="agenda-pages" class="agenda-actions" hidden>
+          <md-outlined-button id="agenda-prev" type="button">Anterior</md-outlined-button>
+          <md-outlined-button id="agenda-next" type="button">Siguiente</md-outlined-button>
+        </div>
+      </div>
+      <form id="agenda-editor" class="card agenda-card" aria-labelledby="agenda-editor-title" novalidate hidden>
+        <h2 id="agenda-editor-title" tabindex="-1">Editar ficha</h2>
+        <div class="field-grid">
+          <md-outlined-text-field class="wide" label="Nombre o razón social" name="name" pattern=".{0,180}" required></md-outlined-text-field>
+          <md-outlined-select name="id_type" label="Tipo de identificación" required>
+            <md-select-option value="CUIT/CUIL" selected><span slot="headline">CUIT/CUIL</span></md-select-option>
+            <md-select-option value="DNI"><span slot="headline">DNI</span></md-select-option>
+          </md-outlined-select>
+          <md-outlined-text-field name="id_number" label="Número de identificación" inputmode="numeric" pattern=".{0,40}" required></md-outlined-text-field>
+          <div class="wide" id="agenda-address"></div>
+        </div>
+        <p id="agenda-editor-status" role="alert" hidden></p>
+        <div class="agenda-actions"><md-filled-button type="submit" id="agenda-save">Guardar cambios</md-filled-button>
+          <md-text-button type="button" id="agenda-cancel">Cancelar</md-text-button></div>
+      </form>
+    </section>
   </main>
 </body>
 </html>

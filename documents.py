@@ -5,6 +5,7 @@ from decimal import Decimal
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from annex import note_amount
+from identification import formatted_number
 from word_pdf import pdf_batch
 from word_templates import assignment_document, demand_document, loan_document, note_document
 from combine_word import combine_pieces
@@ -79,16 +80,47 @@ def calendar_day(value, label):
         raise ValueError(f"Completá {label} con una fecha válida.") from None
 
 
+def address_text(value, label):
+    if isinstance(value, str):
+        # Earlier panels sent a single line. Only accept it when all four parts can be identified.
+        line = field(value, f"el {label}", False)
+        match = re.fullmatch(
+            r"(?P<street>[^,]+?) (?P<number>(?:\d[\w/-]*(?: bis)?|s/?n))\s*,\s*"
+            r"(?:piso\s+(?P<floor>[^,]+),\s*)?(?:(?:depto|dpto)\.?\s+(?P<apartment>[^,]+),\s*)?"
+            r"(?P<locality>[^,]+),\s*(?P<province>[^,]+)", line, re.IGNORECASE)
+        if not match or any(re.match(r"(?:piso|depto|dpto)\b", part.strip(), re.IGNORECASE)
+                            for part in match.group("locality", "province")):
+            raise ValueError(f"Completá el {label} con calle, altura, localidad y provincia.")
+        value = match.groupdict()
+    if not isinstance(value, dict):
+        value = {}
+    street = field(value.get("street"), f"la calle del {label}")
+    number = field(value.get("number"), f"la altura del {label}")
+    floor = field(value.get("floor"), f"el piso del {label}", False)
+    apartment = field(value.get("apartment"), f"el departamento del {label}", False)
+    locality = field(value.get("locality"), f"la localidad del {label}")
+    province = field(value.get("province"), f"la provincia del {label}")
+    parts = [f"{street} {number}"]
+    if floor:
+        parts.append(f"piso {floor}")
+    if apartment:
+        parts.append(f"depto. {apartment}")
+    result = ", ".join([*parts, locality, province])
+    if len(result) > 240:
+        raise ValueError(f"El {label} supera los 240 caracteres.")
+    return result
+
+
 def party(raw, label, *, address_required, id_required=True):
     if not isinstance(raw, dict):
         raw = {}
     id_number = field(raw.get("id_number"), f"la identificación de {label}", id_required)
     kind = raw.get("id_type")
-    if id_number and kind not in ("CUIT", "DNI", "CUIL"):
-        raise ValueError(f"Elegí el tipo de identificación de {label}.")
+    if id_number:
+        id_number = formatted_number(kind, id_number)
     return {"name": field(raw.get("name"), f"el nombre o la razón social de {label}"),
             "id_type": kind, "id_number": id_number,
-            "address": field(raw.get("address"), f"el domicilio de {label}", address_required)}
+            "address": address_text(raw.get("address"), f"domicilio de {label}") if address_required else ""}
 
 
 def rows(raw, *, cheques, need_bank, notes=False, loan=False, detail=False):
@@ -191,7 +223,7 @@ def parse(raw):
     if notes:
         beneficiary = party(raw.get("beneficiary"), "la parte beneficiaria", address_required=not raw.get("separate_payment")) if raw.get("different_beneficiary") else entity
         op["beneficiary"] = beneficiary
-        op["payment_address"] = field(raw.get("payment_address") if raw.get("separate_payment") else beneficiary["address"], "el domicilio de pago")
+        op["payment_address"] = address_text(raw.get("payment_address"), "domicilio de pago") if raw.get("separate_payment") else beneficiary["address"]
     if transfer:
         op["assignee"] = party(raw.get("assignee"), "la parte cesionaria", address_required=False) if raw.get("different_assignee") else entity
     if demand:
@@ -205,6 +237,9 @@ def parse(raw):
     if loan or notes:
         op["installments"] = op["cheques"] if op["linked"] else rows(
             raw.get("installments"), cheques=False, need_bank=False, notes=notes, loan=loan, detail=bank)
+        for index, installment in enumerate(op["installments"], 1):
+            if installment["due"] < op["issue_date"]:
+                raise ValueError(f"El vencimiento de la cuota {index} no puede ser anterior a la fecha de emisión.")
         if loan and any("capital" in r for r in op["installments"]) and not all("capital" in r for r in op["installments"]):
             raise ValueError("Completá capital, interés e IVA para todas las cuotas del Anexo I.")
     return op

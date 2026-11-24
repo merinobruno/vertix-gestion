@@ -29,9 +29,11 @@ UPLOADS = {
 }
 
 
-def service_info(*, pdf_export):
+def service_info(*, pdf_export, party_directory=False):
     return {"status": "ok", "service": "panel-documental", "template_fidelity": True, "demand_note": True,
-            "combined_document": True, "annex_import": True, "pdf_export": pdf_export}
+            "combined_document": True, "annex_import": True, "structured_addresses": True,
+            "party_directory": party_directory, "directory_editor": party_directory, "identification_formats": True,
+            "pdf_export": pdf_export}
 
 
 def upload_for(path, content_type):

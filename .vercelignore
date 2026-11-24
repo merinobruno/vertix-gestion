@@ -15,3 +15,9 @@ test_*.py
 *.pdf
 *.zip
 *.ogg
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-*
+*.sqlite3-*
+*.db-*

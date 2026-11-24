@@ -1,15 +1,19 @@
 import argparse
 import json
+import sqlite3
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from panel_api import ApiError, service_info, submit, upload_for
+import party_directory
+from panel_api import ApiError, JSON, Upload, service_info, submit, upload_for
 
 
 STATIC = Path(__file__).with_name("static")
+DIRECTORY_ROUTES = {"/api/agenda/save", "/api/agenda/search", "/api/agenda/list", "/api/agenda/update"}
+DIRECTORY_UPLOAD = Upload(16384, "La ficha supera el tamaño permitido.", ("application/json",), "Se esperaba una ficha en formato JSON.")
 PAGES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/styles.css": ("styles.css", "text/css; charset=utf-8"),
          "/app.js": ("app.js", "text/javascript; charset=utf-8"),
@@ -44,7 +48,7 @@ class Panel(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         if path == "/api/health":
-            self.respond(200, json.dumps(service_info(pdf_export=True)).encode(), "application/json")
+            self.respond(200, json.dumps(service_info(pdf_export=True, party_directory=True)).encode(), "application/json")
         elif path in PAGES:
             name, mime = PAGES[path]
             self.respond(200, (STATIC/name).read_bytes(), mime)
@@ -53,20 +57,54 @@ class Panel(BaseHTTPRequestHandler):
 
     do_HEAD = do_GET
 
+    def directory_response(self, path, data):
+        try:
+            request = json.loads(data)
+            if not isinstance(request, dict):
+                raise ValueError("Los datos de la ficha son inválidos.")
+            if path == "/api/agenda/search":
+                result = {"parties": party_directory.search(self.server.directory_path, request.get("query"))}
+            elif path == "/api/agenda/list":
+                result = party_directory.list_parties(self.server.directory_path, request.get("query"), request.get("offset", 0))
+            elif path == "/api/agenda/update":
+                result = party_directory.update(self.server.directory_path, request.get("party"), request.get("id"), request.get("revision"))
+            else:
+                result = party_directory.save(self.server.directory_path, request.get("party"), create_only=request.get("create_only") is True)
+            return None, JSON, json.dumps(result, ensure_ascii=False).encode()
+        except party_directory.Conflict as exc:
+            raise ApiError(409, str(exc)) from exc
+        except party_directory.MissingParty as exc:
+            raise ApiError(404, str(exc)) from exc
+        except (ValueError, RecursionError) as exc:
+            message = "Los datos de la ficha son inválidos." if isinstance(exc, (json.JSONDecodeError, UnicodeError, RecursionError)) else str(exc)
+            raise ApiError(422, message) from exc
+        except (OSError, sqlite3.Error) as exc:
+            raise ApiError(503, "No se pudo acceder a la agenda local. Volvé a intentar.") from exc
+
     def do_POST(self):
         if not self.local_request() or self.headers.get("Origin") not in (None, "http://"+self.headers.get("Host","")):
             self.error_json(403, "La descarga debe iniciarse desde el panel local.")
             return
         path = urlsplit(self.path).path
         try:
-            spec = upload_for(path, self.headers.get_content_type())
+            if path in DIRECTORY_ROUTES:
+                if self.headers.get("Origin") != "http://" + self.headers["Host"]:
+                    raise ApiError(403, "Abrí la agenda desde el panel local.")
+                spec = DIRECTORY_UPLOAD
+                if self.headers.get_content_type() not in spec.types:
+                    raise ApiError(415, spec.type_error)
+            else:
+                spec = upload_for(path, self.headers.get_content_type())
             length = self.headers.get("Content-Length", "")
             if not length.isascii() or not length.isdigit() or len(length) > 10 or not 0 < int(length) <= spec.limit:
                 raise ApiError(413, spec.size_error)
             data = self.rfile.read(int(length))
             if len(data) != int(length):
                 raise ApiError(400, "No se recibieron todos los datos.")
-            name, mime, output = submit(path, data, pdf_export=True)
+            if path in DIRECTORY_ROUTES:
+                name, mime, output = self.directory_response(path, data)
+            else:
+                name, mime, output = submit(path, data, pdf_export=True)
         except ApiError as error:
             self.error_json(error.status, str(error))
             return
@@ -76,9 +114,11 @@ class Panel(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Panel documental local")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--directory-db", type=Path, default=party_directory.default_database())
     ap.add_argument("--open", action="store_true")
     args = ap.parse_args()
     server = ThreadingHTTPServer(("127.0.0.1",args.port),Panel)
+    server.directory_path = args.directory_db
     url = f"http://127.0.0.1:{server.server_port}/"
     print(f"Panel documental: {url}",flush=True)
     if args.open:

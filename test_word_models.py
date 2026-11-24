@@ -35,20 +35,97 @@ def legal_pattern(source):
     return "".join(parts) + re.escape(source[position:])
 
 
+def example_address(street, number):
+    return {"street": street, "number": number, "locality": "Ciudad de Prueba", "province": "Neuquén"}
+
+
 def operation():
     return {
         "documents": ["mutuo", "pagares", "cesion"], "format": "docx", "currency": "ARS",
         "place": "Ciudad de Prueba", "issue_date": "2026-11-19", "net": "90000", "penalty": "3",
         "client": {"name": "Comercial de Ejemplo", "id_type": "CUIT",
-                   "id_number": "00-00000000-0", "address": "Calle de Prueba 120"},
+                   "id_number": "00-00000000-0", "address": example_address("Calle de Prueba", "120")},
         "entity": {"name": "Entidad Ficticia", "id_type": "CUIT",
-                   "id_number": "00-00000001-0", "address": "Avenida de Prueba 40"},
+                   "id_number": "00-00000001-0", "address": example_address("Avenida de Prueba", "40")},
         "cheques": [{"number": "PRUEBA-1", "bank": "Banco Ficticio", "due": "2026-12-19", "amount": "52000"},
                     {"number": "PRUEBA-2", "bank": "Banco Ficticio", "due": "2027-01-19", "amount": "54000.23"}],
     }
 
 
 class WordModels(unittest.TestCase):
+    def test_combined_and_known_tax_labels_preserve_all_digits_in_the_generated_model(self):
+        for kind in ("CUIT", "CUIL", "CUIT/CUIL"):
+            with self.subTest(kind=kind):
+                data = operation()
+                data["entity"].update(id_type=kind, id_number="00123456789")
+                docs = dict(word_documents(parse(data)))
+                self.assertIn(kind + " 00-12345678-9", paragraph_text(body(docs["pagare-01-de-02"])))
+        data = operation()
+        data["client"].update(id_type="DNI", id_number="00123456")
+        self.assertEqual(parse(data)["client"]["id_number"], "00.123.456")
+        for kind, number in (("CUIT/CUIL", "12345678"), ("CUIT", "201234567890"), ("DNI", "20123456789")):
+            with self.subTest(kind=kind, number=number), self.assertRaisesRegex(ValueError, "dígitos"):
+                data["client"].update(id_type=kind, id_number=number)
+                parse(data)
+
+    def test_composed_addresses_in_contract_and_separate_payment_note(self):
+        data = operation()
+        data["client"]["address"].update(floor=" 3 ", apartment="B")
+        data.update(separate_payment=True, payment_address=example_address("Calle de Pago", "S/N"))
+        docs = dict(word_documents(parse(data)))
+        contract = paragraph_text(body(docs["mutuo"]))
+        self.assertIn("Calle de Prueba 120, piso 3, depto. B, Ciudad de Prueba, Neuquén", contract)
+        self.assertIn("Avenida de Prueba 40, Ciudad de Prueba, Neuquén", contract)
+        self.assertIn("Calle de Pago S/N, Ciudad de Prueba, Neuquén", paragraph_text(body(docs["pagare-01-de-02"])))
+
+    def test_required_and_legacy_addresses(self):
+        data = operation()
+        for key in ("street", "number", "locality", "province"):
+            with self.subTest(missing=key), self.assertRaisesRegex(ValueError, "domicilio de la parte cliente"):
+                data["client"]["address"] = dict(example_address("San Jorge", "111"), **{key:" "})
+                parse(data)
+        for line in ("San Jorge 111", "San Jorge 111, Neuquén", "San Jorge 111, piso 3, Neuquén"):
+            with self.subTest(line=line), self.assertRaisesRegex(ValueError, "calle, altura, localidad y provincia"):
+                data["client"]["address"] = line
+                parse(data)
+        complete = "San Jorge 111, piso 2, depto. A, Villa Ejemplo, Neuquén"
+        data["client"]["address"] = complete
+        self.assertEqual(parse(data)["client"]["address"], complete)
+        data["client"]["address"] = example_address("x"*230, "10")
+        with self.assertRaisesRegex(ValueError, "240 caracteres"):
+            parse(data)
+
+    def test_only_the_address_used_by_the_model_is_required(self):
+        data = operation()
+        data.update(represented=True, representative=data["client"].copy())
+        del data["client"]["address"]
+        self.assertIn("Calle de Prueba 120", parse(data)["representative"]["address"])
+        beneficiary = dict(data["entity"], address={})
+        notes = dict(data, documents=["pagares"], different_beneficiary=True, beneficiary=beneficiary)
+        with self.assertRaisesRegex(ValueError, "domicilio de la parte beneficiaria"):
+            parse(notes)
+        notes.update(separate_payment=True, payment_address=data["entity"]["address"])
+        self.assertIn("Avenida de Prueba 40", parse(notes)["payment_address"])
+        del notes["payment_address"]["locality"]
+        with self.assertRaisesRegex(ValueError, "localidad del domicilio de pago"):
+            parse(notes)
+
+    def test_each_installment_can_mature_on_or_after_issue(self):
+        for mode in ("cheques", "manual"):
+            with self.subTest(mode=mode):
+                data = operation()
+                data.update(installments_mode=mode, issue_date="2026-12-17")
+                rows = data["cheques"] if mode == "cheques" else [dict(row) for row in data["cheques"]]
+                data["installments"] = rows
+                rows[1]["due"] = "2026-12-15"
+                with self.assertRaisesRegex(ValueError, "cuota 2.*fecha de emisión"):
+                    parse(data)
+                rows[1]["due"] = data["issue_date"]
+                self.assertEqual(parse(data)["installments"][1]["due"].isoformat(), data["issue_date"])
+        data = dict(operation(), documents=["cesion"])
+        data["cheques"][0]["due"] = "2020-01-01"
+        self.assertNotIn("installments", parse(data))
+
     def assert_source_layout(self, output, template, indexes=None):
         doc = body(output)
         original = etree.fromstring(package(template)["word/document.xml"]).find(f"{{{W}}}body")

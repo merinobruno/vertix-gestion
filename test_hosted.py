@@ -62,7 +62,14 @@ class HostedPanel(unittest.IsolatedAsyncioTestCase):
     async def test_excel_upload_and_hosted_formats(self):
         status, _, chunks = await request("/api/health")
         self.assertEqual(status, 200)
-        self.assertFalse(json.loads(b"".join(chunks))["pdf_export"])
+        health = json.loads(b"".join(chunks))
+        self.assertFalse(health["pdf_export"])
+        self.assertTrue(health["structured_addresses"])
+        self.assertFalse(health["party_directory"])
+        self.assertFalse(health["directory_editor"])
+        self.assertTrue(health["identification_formats"])
+        for path in ("/api/agenda/search", "/api/agenda/save", "/api/agenda/list", "/api/agenda/update"):
+            self.assertIn((await request(path, "POST", body=b"{}"))[0], (404, 405))
         plan = workbook([[1, date(2034, 2, 3), 300, 20, 4.2, 324.2, None, 356.62]])
         status, _, chunks = await request("/api/anexo", "POST", body=plan, content_type="application/octet-stream")
         self.assertEqual(status, 200)
@@ -70,6 +77,18 @@ class HostedPanel(unittest.IsolatedAsyncioTestCase):
         for fmt in ("pdf", "both"):
             status, _, _ = await request("/api/generate", "POST", body=json.dumps({"format": fmt}).encode())
             self.assertEqual(status, 422)
+
+    async def test_generation_rejects_incomplete_address_and_early_installment(self):
+        data = operation()
+        del data["client"]["address"]["province"]
+        status, _, chunks = await request("/api/generate", "POST", body=json.dumps(data).encode())
+        self.assertEqual(status, 422)
+        self.assertIn("provincia", json.loads(b"".join(chunks))["error"])
+        data = operation()
+        data["cheques"][0]["due"] = "2026-11-18"
+        status, _, chunks = await request("/api/generate", "POST", body=json.dumps(data).encode())
+        self.assertEqual(status, 422)
+        self.assertIn("cuota 1", json.loads(b"".join(chunks))["error"])
 
     async def test_checks_origin_content_type_and_body_size_before_generation(self):
         for expected, options in [(403, {"origin": "https://otro.example"}), (415, {"content_type": "text/plain"}),
