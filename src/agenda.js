@@ -20,6 +20,7 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
   bindIdentification(field("id_type"), field("id_number"), taxKind, fieldError);
 
   let available = false;
+  let readable = false;
   let active = false;
   let editing = null;
   let saving = false;
@@ -88,7 +89,7 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
 
   function load(offset = 0, delay = 0) {
     stopListRequest();
-    if (!active || editing) return;
+    if (!active || !readable || editing) return;
     const query = search.value.trim();
     const controller = new AbortController();
     request = controller;
@@ -136,7 +137,7 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     agendaTab.setAttribute("aria-selected", String(active));
     opTab.tabIndex = active ? -1 : 0;
     agendaTab.tabIndex = active ? 0 : -1;
-    document.title = active ? "Panel documental · Agenda" : "Panel documental · Nueva operación";
+    document.title = "Panel documental · " + (active ? byId("agenda-title").textContent : "Nueva operación");
     if (!active) stopListRequest();
     else if (!wasActive && !editing) load(pageOffset);
   }
@@ -171,7 +172,8 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
   });
   edit.addEventListener("submit", async event => {
     event.preventDefault();
-    if (!editing || saving || !active) return;
+    if (!editing || saving || !active || !readable) return;
+    const selected = editing;
     setAddressRequirements();
     for (const input of edit.querySelectorAll("md-outlined-text-field, md-outlined-select")) {
       const problem = fieldProblem(input);
@@ -184,19 +186,35 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     editorMessage("");
     try {
       await directoryRequest("update", {id:editing.id, revision:editing.revision, party});
-      returnToList(true);
+      if (editing === selected) returnToList(true);
     } catch (error) {
-      editorMessage(error.message === "Failed to fetch" ? "No se pudo guardar la ficha." : error.message);
+      if (editing === selected) editorMessage(error.message === "Failed to fetch" ? "No se pudo guardar la ficha." : error.message);
     } finally {
       saving = false;
       edit.inert = false;
     }
   });
 
-  return function setAvailable(enabled) {
-    if (available === enabled) return;
+  function setAvailable(enabled, unlocked) {
+    if (available === enabled && readable === unlocked) return;
+    const wasActive = active;
     available = enabled;
+    readable = unlocked;
     tabs.hidden = !enabled;
+    if (!unlocked) {
+      stopListRequest();
+      editing = null;
+      edit.reset();
+      edit.hidden = feedback.hidden = true;
+      for (const field of edit.querySelectorAll("md-outlined-text-field")) field.value = "";
+      search.value = "";
+      focusRow = null;
+      pageOffset = 0;
+      list.replaceChildren();
+      status.textContent = "";
+      editorMessage("");
+    }
+    browse.hidden = !unlocked || Boolean(editing);
     if (enabled) {
       operation.setAttribute("role", "tabpanel");
       operation.setAttribute("aria-labelledby", opTab.id);
@@ -205,5 +223,7 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
       operation.removeAttribute("aria-labelledby");
     }
     useView(enabled && location.hash === "#agenda");
-  };
+    if (wasActive && active && readable && !editing) load(pageOffset);
+  }
+  return {setAvailable, reload:() => load(0)};
 }

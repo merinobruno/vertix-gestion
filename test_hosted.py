@@ -11,12 +11,16 @@ from test_annex import workbook
 from test_word_models import operation
 
 
-async def request(path, method="GET", *, body=b"", content_type="application/json", origin="https://panel.example"):
+async def request(path, method="GET", *, body=b"", content_type="application/json", origin="https://panel.example", cookie=None):
     from app import app
 
     scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"}, "http_version": "1.1",
              "method": method, "scheme": "https", "path": path, "query_string": b"",
-             "headers": [(b"host", b"panel.example"), (b"origin", origin.encode()), (b"content-type", content_type.encode())]}
+             "headers": [(b"host", b"panel.example"), (b"content-type", content_type.encode())]}
+    if origin is not None:
+        scope["headers"].append((b"origin", origin.encode()))
+    if cookie is not None:
+        scope["headers"].append((b"cookie", cookie.encode()))
     events = []
 
     async def receive():
@@ -67,12 +71,11 @@ class HostedPanel(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(health["structured_addresses"])
         self.assertFalse(health["party_directory"])
         self.assertFalse(health["directory_editor"])
-        self.assertTrue(health["browser_directory"])
-        status, _, _ = await request("/api/agenda/list", "POST", body=b"{}")
-        self.assertEqual(status, 405)
+        self.assertFalse(health["browser_directory"])
+        self.assertTrue(health["shared_directory"])
         self.assertTrue(health["identification_formats"])
         for path in ("/api/agenda/search", "/api/agenda/save", "/api/agenda/list", "/api/agenda/update"):
-            self.assertIn((await request(path, "POST", body=b"{}"))[0], (404, 405))
+            self.assertEqual((await request(path, "POST", body=b"{}"))[0], 401)
         plan = workbook([[1, date(2034, 2, 3), 300, 20, 4.2, 324.2, None, 356.62]])
         status, _, chunks = await request("/api/anexo", "POST", body=plan, content_type="application/octet-stream")
         self.assertEqual(status, 200)

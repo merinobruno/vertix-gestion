@@ -6,9 +6,11 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from panel_api import ApiError, service_info, submit, upload_for
+from shared_agenda import router as shared_agenda
 
 
 app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+app.include_router(shared_agenda)
 PRIVATE_HEADERS = {"Cache-Control": "private, no-store"}
 
 
@@ -19,7 +21,7 @@ async def api_error(request, exc):
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health():
-    return JSONResponse(service_info(pdf_export=False, browser_directory=True), headers=PRIVATE_HEADERS)
+    return JSONResponse(service_info(pdf_export=False, shared_directory=True), headers=PRIVATE_HEADERS)
 
 
 async def download_chunks(data):
