@@ -1,6 +1,4 @@
 import json
-import os
-import secrets
 import sqlite3
 import tempfile
 import threading
@@ -13,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from party_directory import list_parties, save, search, update
-from server import HOSTED_AGENDA, Panel
+from server import HOSTED_PANEL, Panel
 from test_word_models import example_address
 
 
@@ -58,34 +56,41 @@ class PartyDirectory(unittest.TestCase):
         self.party = {"name":"Álamo de Prueba", "id_type":"DNI", "id_number":"00.000.111",
                       "address":dict(example_address("Calle de Prueba", "8"), floor="2", apartment="B")}
 
-    def test_local_team_link_uses_only_the_provisioned_destination(self):
-        self.enterContext(patch.dict(os.environ, {"LOCALAPPDATA": str(self.path.parent)}))
-        shortcut = self.path.parent / "Vertix" / "Acceso Agenda" / "Agenda compartida.url"
-        shortcut.parent.mkdir(parents=True)
-        team_url = HOSTED_AGENDA + "/" + secrets.token_hex(32)
-        with local_panel(self.path) as port:
-            def navigate(headers=None):
-                with closing(HTTPConnection("127.0.0.1", port, timeout=3)) as connection:
-                    connection.request("GET", "/agenda-compartida", headers=headers or {})
-                    response = connection.getresponse()
-                    self.assertIn("no-store", response.getheader("Cache-Control"))
-                    return response.status, response.getheader("Location")
-
-            self.assertEqual(navigate(), (302, HOSTED_AGENDA))
-            shortcut.write_text("[InternetShortcut]\nURL=https://otro.example/\n", encoding="utf-8")
-            self.assertEqual(navigate(), (302, HOSTED_AGENDA))
-            shortcut.write_text("[InternetShortcut]\nURL=" + team_url + "\n", encoding="utf-8-sig")
-            self.assertEqual(navigate({"Sec-Fetch-Site":"same-origin"}), (302, team_url))
-            for headers in ({"Origin":"https://otro.example"}, {"Sec-Fetch-Site":"cross-site"}, {"Host":"otro.example"}):
-                self.assertEqual(navigate(headers), (403, None))
+    def test_normal_desktop_uses_the_hosted_directory(self):
+        with local_panel(None) as port, patch("server.http.client.HTTPSConnection") as connect:
+            status, health = request(port, "/api/health", method="GET")
+            self.assertEqual(status, 200)
+            self.assertTrue(health["shared_directory"] and health["pdf_export"])
+            self.assertFalse(health["party_directory"])
+            for origin in (False, "https://otro.example"):
+                self.assertEqual(request(port, "/api/agenda/save", {"party":self.party}, origin=origin)[0], 403)
+            self.assertEqual(request(port, "/api/agenda/save", {}, host="otro.example")[0], 403)
+            connect.assert_not_called()
+            upstream = connect.return_value
+            reply = upstream.getresponse.return_value
+            reply.status = 200
+            reply.read.return_value = json.dumps({"parties":[self.party]}).encode()
+            query = {"query":"Álamo"}
+            self.assertEqual(request(port, "/api/agenda/search", query), (200, {"parties":[self.party]}))
+            connect.assert_called_once_with(HOSTED_PANEL, timeout=20)
+            upstream.request.assert_called_once_with("POST", "/api/agenda/search", body=json.dumps(query).encode(),
+                headers={"Content-Type":"application/json", "Origin":"https://" + HOSTED_PANEL})
+            for action in ("save", "update", "import"):
+                reply.status, reply.read.return_value = 409, b'{"error":"La ficha ya existe."}'
+                self.assertEqual(request(port, "/api/agenda/" + action, {"party":self.party}), (409, {"error":"La ficha ya existe."}))
+            upstream.request.side_effect = OSError("offline")
+            self.assertEqual(request(port, "/api/agenda/save", {"party":self.party})[0], 503)
+            self.assertFalse(self.path.exists())
 
     def test_shared_across_roles_and_server_restarts(self):
         with local_panel(self.path) as port:
             status, health = request(port, "/api/health", method="GET")
             self.assertEqual(status, 200)
             self.assertTrue(health["party_directory"])
+            self.assertFalse(health["shared_directory"])
             self.assertTrue(health["directory_editor"])
             self.assertTrue(health["identification_formats"])
+            self.assertEqual(request(port, "/api/agenda/import", {"parties":[self.party]})[0], 404)
             status, saved = request(port, "/api/agenda/save", {"role":"client", "party":self.party})
             self.assertEqual(status, 200)
             self.assertTrue(saved["created"])

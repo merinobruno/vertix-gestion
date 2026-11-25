@@ -1,11 +1,11 @@
 $ErrorActionPreference = 'Stop'
-$ports = @(8765, 8766)
+$ports = 8765..8767
 foreach ($port in $ports) {
     $url = "http://127.0.0.1:$port"
     try {
         $health = Invoke-RestMethod -Uri "$url/api/health" -TimeoutSec 2
         if ($health.service -eq 'panel-documental' -and $health.annex_import -eq $true -and
-            $health.directory_editor -eq $true -and $health.identification_formats -eq $true) {
+            $health.shared_directory -eq $true -and $health.pdf_export -eq $true -and $health.identification_formats -eq $true) {
             Start-Process "$url/"
             exit 0
         }
@@ -19,7 +19,7 @@ foreach ($port in $ports) {
     finally { $socket.Dispose() }
 }
 if (-not $available) {
-    Write-Host 'Los puertos locales 8765 y 8766 ya estan ocupados.'
+    Write-Host 'Los puertos locales del 8765 al 8767 ya estan ocupados.'
     exit 1
 }
 $python = Get-AppxPackage -Name 'OpenAI.CodexPrimaryRuntime*' |

@@ -1,8 +1,8 @@
 import {icon} from "./material.js";
-import {attachDirectory, localDirectoryRequest} from "./party-directory.js";
+import {attachDirectory, directoryRequest} from "./party-directory.js";
 import {setupAgenda} from "./agenda.js";
 import {addressFields, addressLine} from "./address.js";
-import {setupSharedDirectory} from "./shared-directory.js";
+import {setupLegacyImport} from "./legacy-directory.js";
 import {bindIdentification, identificationProblem, readIdentification, taxKind, writeIdentification} from "./identification.js";
 
 const form = document.querySelector("#operation");
@@ -25,8 +25,7 @@ let changed = false;
 let busy = false;
 let templateService = null;
 let combinedService = null;
-let directoryBackend = null;
-let directoryMode = "";
+let directoryAvailable = true;
 const directories = [];
 let migrationWindow = null;
 let importRevision = 0;
@@ -41,21 +40,6 @@ byId("open-service").hidden = !companion;
 
 function element(tag, props = {}) {
   return Object.assign(document.createElement(tag), props);
-}
-
-function directoryRequest(action, payload, signal) {
-  if (!directoryBackend) return Promise.reject(new Error("La Agenda no está disponible."));
-  return directoryBackend(action, payload, signal);
-}
-
-function updateDirectoryAccess() {
-  const sharedMode = directoryMode === "shared";
-  byId("agenda-title").textContent = directoryMode === "local" ? "Agenda local" : "Agenda";
-  byId("agenda-shared-link").hidden = directoryMode !== "local";
-  directoryBackend = directoryMode === "local" ? localDirectoryRequest : sharedMode && shared.available ? shared.request : null;
-  byId("agenda-storage").hidden = !sharedMode || !shared.available;
-  agenda.setAvailable(Boolean(directoryMode), Boolean(directoryBackend));
-  refresh();
 }
 
 function writeField(field, value) {
@@ -602,7 +586,7 @@ function refresh() {
   for (const field of form.querySelectorAll("[data-reported]")) {
     fieldError(field, field.disabled ? "" : fieldProblem(field));
   }
-  for (const directory of directories) directory.sync(Boolean(directoryBackend));
+  for (const directory of directories) directory.sync(directoryAvailable);
   byId("no-values").hidden = docs.length > 0;
   const notice = byId("draft-notice");
   notice.hidden = docs.length === available.length;
@@ -789,13 +773,12 @@ async function verifyService() {
   const health = await response.json();
   const currentService = health.service === "panel-documental" && health.identification_formats === true;
   const localDirectory = localPanel && currentService && health.party_directory === true && health.directory_editor === true;
-  const mode = localDirectory ? "local" : currentService && health.shared_directory === true ? "shared" : "";
-  if (mode !== directoryMode) {
-    directoryMode = mode;
-    shared.enable(mode === "shared");
-    updateDirectoryAccess();
-  }
-  const oldLocalService = localPanel && health.pdf_export === true && !localDirectory;
+  const sharedDirectory = currentService && health.shared_directory === true;
+  directoryAvailable = localDirectory || sharedDirectory;
+  byId("agenda-title").textContent = localDirectory ? "Agenda local" : "Agenda";
+  agenda.setAvailable(directoryAvailable);
+  enableImport(sharedDirectory);
+  const oldLocalService = localPanel && health.pdf_export === true && !directoryAvailable;
   templateService = health.service === "panel-documental" && health.annex_import === true && health.structured_addresses === true
     && health.identification_formats === true && !oldLocalService;
   combinedService = health.combined_document === true;
@@ -911,9 +894,9 @@ form.addEventListener("submit",async event => {
   }
 });
 
-const agenda = setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest,
-  viewFragment:showAgenda => shared.fragment(showAgenda)});
-const shared = setupSharedDirectory(updateDirectoryAccess, agenda.reload);
+const agenda = setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest});
+const enableImport = setupLegacyImport(directoryRequest, agenda.reload);
+agenda.setAvailable(true);
 enableNumericDate(control("issue_date"));
 writeField(control("issue_date"), localDate());
 createRow("cheques");
@@ -922,7 +905,7 @@ showPage(0);
 refresh();
 Promise.all([...form.querySelectorAll("md-outlined-select")].map(node => node.updateComplete)).then(async () => {
   refresh();
-  if (await verifyService() && directoryBackend === localDirectoryRequest && companion && location.hash === "#continuar" && window.opener) {
+  if (await verifyService() && directoryAvailable && companion && location.hash === "#continuar" && window.opener) {
     window.opener.postMessage({type:"panel-ready", structured_addresses:true, party_directory:true, directory_editor:true,
       identification_formats:true},companion.origin);
   }

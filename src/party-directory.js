@@ -23,12 +23,13 @@ function node(tag, properties = {}) {
   return Object.assign(document.createElement(tag), properties);
 }
 
-export async function localDirectoryRequest(action, payload, signal) {
+export async function directoryRequest(action, payload, signal) {
   const response = await fetch("/api/agenda/" + action, {
-    method:"POST", headers:{"Content-Type":"application/json"}, cache:"no-store", body:JSON.stringify(payload), signal,
+    method:"POST", headers:{"Content-Type":"application/json"}, credentials:"omit", cache:"no-store", redirect:"error",
+    body:JSON.stringify(payload), signal,
   });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || "No se pudo acceder a la agenda local.");
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result) throw new Error(result?.error || "No se pudo conectar con la Agenda. Volvé a intentar.");
   return result;
 }
 

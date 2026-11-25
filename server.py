@@ -1,6 +1,6 @@
 import argparse
+import http.client
 import json
-import re
 import sqlite3
 import threading
 import webbrowser
@@ -13,28 +13,38 @@ from panel_api import ApiError, JSON, Upload, service_info, submit, upload_for
 
 
 STATIC = Path(__file__).with_name("static")
-HOSTED_AGENDA = "https://vertix-gestion.vercel.app/#agenda"
-DIRECTORY_ROUTES = {"/api/agenda/save", "/api/agenda/search", "/api/agenda/list", "/api/agenda/update"}
+HOSTED_PANEL = "vertix-gestion.vercel.app"
+DIRECTORY_ROUTES = {"/api/agenda/save", "/api/agenda/search", "/api/agenda/list", "/api/agenda/update", "/api/agenda/import"}
 DIRECTORY_UPLOAD = Upload(16384, "La ficha supera el tamaño permitido.", ("application/json",), "Se esperaba una ficha en formato JSON.")
+IMPORT_UPLOAD = Upload(98304, "La importación supera el tamaño permitido.", DIRECTORY_UPLOAD.types, DIRECTORY_UPLOAD.type_error)
 PAGES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/styles.css": ("styles.css", "text/css; charset=utf-8"),
          "/app.js": ("app.js", "text/javascript; charset=utf-8"),
          "/plantilla-anexo-i.xlsx": ("plantilla-anexo-i.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
 
 
-def team_agenda_url():
-    shortcut = party_directory.default_database().parent / "Acceso Agenda" / "Agenda compartida.url"
+def relay_directory(path, data):
+    unavailable = "No se pudo conectar con la agenda compartida. Volvé a intentar."
+    connection = http.client.HTTPSConnection(HOSTED_PANEL, timeout=20)
     try:
-        with shortcut.open("rb") as source:
-            raw = source.read(2048)
-        encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
-        for line in raw.decode(encoding).splitlines():
-            name, _, value = line.partition("=")
-            if name.upper() == "URL" and re.fullmatch(re.escape(HOSTED_AGENDA) + r"/[a-f0-9]{64}", value):
-                return value
-    except (OSError, UnicodeError):
-        pass
-    return HOSTED_AGENDA
+        connection.request("POST", path, body=data, headers={"Origin": "https://" + HOSTED_PANEL, "Content-Type": "application/json"})
+        response = connection.getresponse()
+        raw = response.read(196609)
+        if len(raw) > 196608 or response.status not in (200, 404, 409, 413, 415, 422):
+            raise ApiError(503, unavailable)
+        result = json.loads(raw)
+        if not isinstance(result, dict):
+            raise ApiError(503, unavailable)
+        if response.status != 200:
+            error = result.get("error")
+            if not isinstance(error, str) or not 0 < len(error) <= 220:
+                raise ApiError(503, unavailable)
+            raise ApiError(response.status, error)
+        return None, JSON, raw
+    except (OSError, http.client.HTTPException, ValueError, RecursionError) as exc:
+        raise ApiError(503, unavailable) from exc
+    finally:
+        connection.close()
 
 
 class Panel(BaseHTTPRequestHandler):
@@ -42,7 +52,7 @@ class Panel(BaseHTTPRequestHandler):
         hosts = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
         return self.headers.get("Host") in hosts
 
-    def respond(self, status, data, content_type, name=None, *, location=None):
+    def respond(self, status, data, content_type, name=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
@@ -52,8 +62,6 @@ class Panel(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
         if name:
             self.send_header("Content-Disposition", f'attachment; filename="{name}"')
-        if location:
-            self.send_header("Location", location)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(data)
@@ -67,13 +75,8 @@ class Panel(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         if path == "/api/health":
-            self.respond(200, json.dumps(service_info(pdf_export=True, party_directory=True)).encode(), "application/json")
-        elif path == "/agenda-compartida":
-            if (self.headers.get("Origin") not in (None, "http://" + self.headers["Host"])
-                    or self.headers.get("Sec-Fetch-Site") not in (None, "none", "same-origin")):
-                self.error_json(403, "Abrí la agenda desde el panel local.")
-                return
-            self.respond(302, b"", "text/plain", location=team_agenda_url())
+            local = self.server.directory_path is not None
+            self.respond(200, json.dumps(service_info(pdf_export=True, party_directory=local, shared_directory=not local)).encode(), "application/json")
         elif path in PAGES:
             name, mime = PAGES[path]
             self.respond(200, (STATIC/name).read_bytes(), mime)
@@ -115,7 +118,9 @@ class Panel(BaseHTTPRequestHandler):
             if path in DIRECTORY_ROUTES:
                 if self.headers.get("Origin") != "http://" + self.headers["Host"]:
                     raise ApiError(403, "Abrí la agenda desde el panel local.")
-                spec = DIRECTORY_UPLOAD
+                if path == "/api/agenda/import" and self.server.directory_path is not None:
+                    raise ApiError(404, "La dirección solicitada no existe.")
+                spec = IMPORT_UPLOAD if path == "/api/agenda/import" else DIRECTORY_UPLOAD
                 if self.headers.get_content_type() not in spec.types:
                     raise ApiError(415, spec.type_error)
             else:
@@ -127,7 +132,8 @@ class Panel(BaseHTTPRequestHandler):
             if len(data) != int(length):
                 raise ApiError(400, "No se recibieron todos los datos.")
             if path in DIRECTORY_ROUTES:
-                name, mime, output = self.directory_response(path, data)
+                handler = self.directory_response if self.server.directory_path is not None else relay_directory
+                name, mime, output = handler(path, data)
             else:
                 name, mime, output = submit(path, data, pdf_export=True)
         except ApiError as error:
@@ -139,7 +145,8 @@ class Panel(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Panel documental local")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--directory-db", type=Path, default=party_directory.default_database())
+    ap.add_argument("--directory-db", type=Path, nargs="?", const=party_directory.default_database(),
+                    help="Use an offline SQLite directory instead of the shared agenda.")
     ap.add_argument("--open", action="store_true")
     args = ap.parse_args()
     server = ThreadingHTTPServer(("127.0.0.1",args.port),Panel)

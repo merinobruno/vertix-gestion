@@ -73,8 +73,6 @@ class HostedPanel(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(health["browser_directory"])
         self.assertTrue(health["shared_directory"])
         self.assertTrue(health["identification_formats"])
-        for path in ("/api/agenda/search", "/api/agenda/save", "/api/agenda/list", "/api/agenda/update"):
-            self.assertEqual((await request(path, "POST", body=b"{}"))[0], 401)
         plan = workbook([[1, date(2034, 2, 3), 300, 20, 4.2, 324.2, None, 356.62]])
         status, _, chunks = await request("/api/anexo", "POST", body=plan, content_type="application/octet-stream")
         self.assertEqual(status, 200)

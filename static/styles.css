@@ -91,9 +91,6 @@ h2 { font-size: 1.23rem; font-weight: 540; letter-spacing: -.025em; line-height:
 .workspace-tabs [aria-selected=true] { background: #d7e6ff; color: #123866; font-weight: 600; }
 .top-inner:has(.workspace-tabs:not([hidden])) { gap: 10px 18px; flex-wrap: wrap; padding-block: 8px; }
 .agenda-card { max-width: 820px; padding: clamp(18px, 3vw, 30px); }
-#agenda-storage { margin-top: 8px; color: #465364; }
-#agenda-shared-link { display: inline-block; margin-top: 8px; color: #0b57d0; }
-#agenda-access-status { margin-bottom: 14px; color: #465364; }
 #agenda-import-status, #agenda-import { margin-top: 14px; }
 .agenda-card h2 { margin: 0 0 22px; font-size: 1.15rem; }
 .agenda-search { display: grid; gap: 7px; font-weight: 550; }

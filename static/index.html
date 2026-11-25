@@ -151,17 +151,15 @@
     </form>
     </div>
     <section id="agenda-view" role="tabpanel" aria-labelledby="tab-agenda" hidden>
-      <div class="intro"><div><h1 id="agenda-title">Agenda</h1><p id="agenda-storage" hidden>Las fichas se comparten con el equipo.</p>
-        <a id="agenda-shared-link" href="/agenda-compartida" target="_blank" rel="noopener noreferrer" hidden>Abrir agenda compartida</a></div>
-        <md-outlined-button id="agenda-copy-link" type="button" hidden>Copiar enlace del equipo</md-outlined-button></div>
-      <p id="agenda-access-status" role="status" hidden></p>
-      <md-text-button id="agenda-retry" type="button" hidden>Volver a intentar</md-text-button>
+      <div class="intro"><h1 id="agenda-title">Agenda</h1>
+        <md-outlined-button id="agenda-new" type="button">Nueva ficha</md-outlined-button></div>
       <div id="agenda-browse" class="card agenda-card" hidden>
         <label class="agenda-search">Buscar
           <input id="agenda-search" type="search" placeholder="Nombre, razón social, CUIT, CUIL o DNI" maxlength="240" autocomplete="off">
         </label>
         <p id="agenda-feedback" role="status" hidden></p>
         <p id="agenda-status" role="status" aria-live="polite"></p>
+        <md-text-button id="agenda-retry" type="button" hidden>Volver a intentar</md-text-button>
         <ul id="agenda-list" aria-label="Fichas de clientes y entidades"></ul>
         <div id="agenda-pages" class="agenda-actions" hidden>
           <md-outlined-button id="agenda-prev" type="button">Anterior</md-outlined-button>

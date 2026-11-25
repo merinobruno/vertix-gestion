@@ -1,5 +1,4 @@
 import hashlib
-import hmac
 import http.client
 import json
 import os
@@ -17,10 +16,8 @@ from party_directory import search_key, validated_party
 
 
 router = APIRouter(prefix="/api/agenda")
-LINK_HEADER = "X-Vertix-Agenda-Link"
-PRIVATE = {"Cache-Control": "private, no-store", "Vary": LINK_HEADER}
+PRIVATE = {"Cache-Control": "private, no-store"}
 UNAVAILABLE = "No se pudo conectar con la agenda compartida. Volvé a intentar."
-LINK_REQUIRED = "Abrí el enlace de la Agenda que compartió tu equipo."
 DATA_ACTIONS = {"search", "list", "save", "update", "import"}
 
 
@@ -28,17 +25,15 @@ DATA_ACTIONS = {"search", "list", "save", "update", "import"}
 class Settings:
     host: str
     service_key: str
-    link_hash: str
 
     @classmethod
     def configured(cls):
         url = os.environ.get("VERTIX_AGENDA_URL", "").strip()
         host = re.fullmatch(r"https://([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.convex\.site)/?", url)
         key = os.environ.get("VERTIX_AGENDA_SERVICE_KEY", "").strip()
-        digest = os.environ.get("VERTIX_AGENDA_LINK_HASH", "").strip()
-        if not host or not re.fullmatch(r"[!-~]{32,512}", key) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        if not host or not re.fullmatch(r"[!-~]{32,512}", key):
             return None
-        return cls(host[1], key, digest)
+        return cls(host[1], key)
 
 
 def canonical_party(party, allow_empty_address):
@@ -136,19 +131,12 @@ async def agenda(action: str, request: Request):
     origin = request.headers.get("origin")
     if not host or (origin != "https://" + host and not (local and origin == "http://" + host)):
         raise ApiError(403, "Abrí la agenda desde el panel.")
-    if action not in DATA_ACTIONS and action != "access":
+    if action not in DATA_ACTIONS:
         raise ApiError(404, "La dirección solicitada no existe.")
-    link = request.headers.get(LINK_HEADER, "")
-    if not re.fullmatch(r"[0-9a-f]{64}", link):
-        raise ApiError(401, LINK_REQUIRED)
     settings = Settings.configured()
     if not settings:
         raise ApiError(503, UNAVAILABLE)
-    if not hmac.compare_digest(hashlib.sha256(link.encode("ascii")).hexdigest(), settings.link_hash):
-        raise ApiError(401, LINK_REQUIRED)
-    body = await body_for(request, 98304 if action == "import" else 16384 if action in DATA_ACTIONS else 1024)
-    if action == "access":
-        return JSONResponse({"available": True}, headers=PRIVATE)
+    body = await body_for(request, 98304 if action == "import" else 16384)
     try:
         data = prepared(action, body)
     except ValueError as exc:

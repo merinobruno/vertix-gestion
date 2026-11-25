@@ -1,6 +1,6 @@
 import {bindIdentification, displayNumber, readIdentification, taxKind, writeIdentification} from "./identification.js";
 
-export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest, viewFragment}) {
+export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest}) {
   const byId = id => document.getElementById(id);
   const tabs = byId("workspace-tabs");
   const opTab = byId("tab-operation");
@@ -8,9 +8,11 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
   const operation = byId("operation-view");
   const view = byId("agenda-view");
   const browse = byId("agenda-browse");
+  const newButton = byId("agenda-new");
   const search = byId("agenda-search");
   const list = byId("agenda-list");
   const status = byId("agenda-status");
+  const retry = byId("agenda-retry");
   const feedback = byId("agenda-feedback");
   const edit = byId("agenda-editor");
   const editorStatus = byId("agenda-editor-status");
@@ -20,7 +22,6 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
   bindIdentification(field("id_type"), field("id_number"), taxKind, fieldError);
 
   let available = false;
-  let readable = false;
   let active = false;
   let editing = null;
   let saving = false;
@@ -43,11 +44,11 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
   }
 
   function setAddressRequirements() {
-    const filled = components.some(key => field("address." + key).value.trim());
-    for (const key of components) field("address." + key).required = filled && key !== "floor" && key !== "apartment";
+    const required = (editing && !editing.id) || components.some(key => field("address." + key).value.trim());
+    for (const key of components) field("address." + key).required = required && key !== "floor" && key !== "apartment";
   }
 
-  function openEditor(party) {
+  function openEditor(party = {name:"", id_type:taxKind, id_number:""}) {
     stopListRequest();
     feedback.hidden = true;
     editing = party;
@@ -58,8 +59,12 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     setAddressRequirements();
     editorMessage("");
     browse.hidden = true;
+    newButton.hidden = true;
     edit.hidden = false;
-    byId("agenda-editor-title").focus();
+    const title = byId("agenda-editor-title");
+    title.textContent = party.id ? "Editar ficha" : "Nueva ficha";
+    byId("agenda-save").textContent = party.id ? "Guardar cambios" : "Guardar ficha";
+    (party.id ? title : field("name")).focus();
   }
 
   function render(rows) {
@@ -89,12 +94,13 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
 
   function load(offset = 0, delay = 0) {
     stopListRequest();
-    if (!active || !readable || editing) return;
+    if (!active || !available || editing) return;
     const query = search.value.trim();
     const controller = new AbortController();
     request = controller;
     list.replaceChildren();
     byId("agenda-pages").hidden = true;
+    retry.hidden = true;
     status.classList.remove("failed");
     status.textContent = "Buscando…";
     timer = setTimeout(async () => {
@@ -116,6 +122,8 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
         if (request !== controller) return;
         status.textContent = error.message === "Failed to fetch" ? "No se pudo consultar la Agenda." : error.message;
         status.classList.add("failed");
+        retry.onclick = () => load(offset);
+        retry.hidden = false;
       } finally {
         if (request === controller) request = null;
       }
@@ -123,13 +131,17 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
   }
 
   function agendaInUrl() {
-    return location.hash === "#agenda" || location.hash.startsWith("#agenda/");
+    const wasAgenda = location.hash.startsWith("#agenda/");
+    if (wasAgenda || location.hash.startsWith("#operacion/")) {
+      history.replaceState(history.state, "", location.pathname + location.search + (wasAgenda ? "#agenda" : ""));
+    }
+    return location.hash === "#agenda";
   }
 
   function useView(showAgenda, changeUrl = false) {
     if (!available && showAgenda) return;
     if (changeUrl) {
-      const fragment = viewFragment(showAgenda);
+      const fragment = showAgenda ? "#agenda" : "";
       if (location.hash !== fragment) {
         const url = new URL(location.href);
         url.hash = fragment;
@@ -149,14 +161,21 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     else if (!wasActive && !editing) load(pageOffset);
   }
 
-  function returnToList(saved) {
-    focusRow = editing.id;
+  function returnToList(savedParty) {
+    const creating = !editing.id;
+    focusRow = savedParty?.id ?? editing.id ?? null;
     editing = null;
     edit.hidden = true;
+    newButton.hidden = false;
     browse.hidden = false;
-    feedback.textContent = saved ? "Ficha actualizada." : "";
-    feedback.hidden = !saved;
+    feedback.textContent = savedParty ? (creating ? "Ficha guardada." : "Ficha actualizada.") : "";
+    feedback.hidden = !savedParty;
+    if (creating && savedParty) {
+      search.value = "";
+      pageOffset = 0;
+    }
     load(pageOffset);
+    if (creating && !savedParty) newButton.focus();
   }
 
   opTab.addEventListener("click", () => useView(false, true));
@@ -169,17 +188,18 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     useView(showAgenda, true);
   });
   window.addEventListener("hashchange", () => useView(agendaInUrl()));
+  newButton.addEventListener("click", () => openEditor());
   search.addEventListener("input", () => { feedback.hidden = true; focusRow = null; load(0, 120); });
   byId("agenda-prev").addEventListener("click", () => load(Math.max(0, pageOffset - pageSize)));
   byId("agenda-next").addEventListener("click", () => load(pageOffset + pageLength));
-  byId("agenda-cancel").addEventListener("click", () => returnToList(false));
+  byId("agenda-cancel").addEventListener("click", () => returnToList());
   edit.addEventListener("input", () => {
     setAddressRequirements();
     for (const input of edit.querySelectorAll("[data-reported]")) fieldError(input, fieldProblem(input));
   });
   edit.addEventListener("submit", async event => {
     event.preventDefault();
-    if (!editing || saving || !active || !readable) return;
+    if (!editing || saving || !active || !available) return;
     const selected = editing;
     setAddressRequirements();
     for (const input of edit.querySelectorAll("md-outlined-text-field, md-outlined-select")) {
@@ -192,8 +212,10 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     edit.inert = true;
     editorMessage("");
     try {
-      await directoryRequest("update", {id:editing.id, revision:editing.revision, party});
-      if (editing === selected) returnToList(true);
+      const result = selected.id
+        ? await directoryRequest("update", {id:selected.id, revision:selected.revision, party})
+        : await directoryRequest("save", {create_only:true, party});
+      if (editing === selected) returnToList(result.party);
     } catch (error) {
       if (editing === selected) editorMessage(error.message === "Failed to fetch" ? "No se pudo guardar la ficha." : error.message);
     } finally {
@@ -202,17 +224,19 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     }
   });
 
-  function setAvailable(enabled, unlocked) {
-    if (available === enabled && readable === unlocked) return;
-    const wasActive = active;
+  function setAvailable(enabled) {
+    if (available === enabled) {
+      if (active) document.title = "Panel documental · " + byId("agenda-title").textContent;
+      return;
+    }
     available = enabled;
-    readable = unlocked;
     tabs.hidden = !enabled;
-    if (!unlocked) {
+    if (!enabled) {
       stopListRequest();
       editing = null;
+      newButton.hidden = false;
       edit.reset();
-      edit.hidden = feedback.hidden = true;
+      edit.hidden = feedback.hidden = retry.hidden = true;
       for (const field of edit.querySelectorAll("md-outlined-text-field")) field.value = "";
       search.value = "";
       focusRow = null;
@@ -221,7 +245,7 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
       status.textContent = "";
       editorMessage("");
     }
-    browse.hidden = !unlocked || Boolean(editing);
+    browse.hidden = !enabled || Boolean(editing);
     if (enabled) {
       operation.setAttribute("role", "tabpanel");
       operation.setAttribute("aria-labelledby", opTab.id);
@@ -230,7 +254,7 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
       operation.removeAttribute("aria-labelledby");
     }
     useView(enabled && agendaInUrl());
-    if (wasActive && active && readable && !editing) load(pageOffset);
   }
+  try { localStorage.removeItem("vertix.agenda.team-link"); } catch { /* Old bookmarks also work with storage disabled. */ }
   return {setAvailable, reload:() => load(0)};
 }
