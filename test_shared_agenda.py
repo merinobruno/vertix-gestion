@@ -70,3 +70,20 @@ class SharedAgenda(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await self.post("list"))[0], 503)
                 self.assertEqual((await self.post("search"))[0], 503)
         forward.assert_not_called()
+
+    async def test_canonical_request_keeps_representatives_and_validates_their_ids(self):
+        import shared_agenda
+        from test_word_models import example_address
+        forward = self.enterContext(patch.object(shared_agenda, "forward", return_value={"created":True}))
+        borrower = {"name":"Representante A", "id_type":"CUIT", "id_number":"30000000111",
+                    "address":example_address("Calle Uno", "25")}
+        lender = {"name":"Representante B", "id_number":"00000012", "title":"la Sra."}
+        party = {"name":"Ejemplo", "id_type":"DNI", "id_number":"987", "borrower_representative":borrower,
+                 "lender_representative":lender}
+        self.assertEqual((await self.post("save", {"party":party}))[0], 200)
+        profile = forward.call_args.args[2]["record"]["profile"]
+        self.assertEqual(profile["borrower_representative"]["id_number"], "30-00000011-1")
+        self.assertEqual(profile["lender_representative"], dict(lender, id_type="DNI", id_number="00.000.012"))
+        lender["id_number"] = "123456789"
+        self.assertEqual((await self.post("save", {"party":party}))[0], 422)
+        self.assertEqual(forward.call_count, 1)

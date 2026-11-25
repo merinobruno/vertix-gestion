@@ -84,6 +84,8 @@ h2 { font-size: 1.23rem; font-weight: 540; letter-spacing: -.025em; line-height:
 .directory-options strong { color: #233850; font-weight: 560; overflow-wrap: anywhere; }
 .directory-options li > span, .directory-actions > span { color: #465364; font-size: .84rem; }
 .directory-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.group > .directory-actions { margin-top: 14px; }
+.subgroup h3 { margin: 0 0 12px; font-size: 1rem; font-weight: 580; }
 .directory-actions .failed { color: var(--md-sys-color-error); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .workspace-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }

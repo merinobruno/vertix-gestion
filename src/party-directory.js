@@ -33,8 +33,8 @@ export async function directoryRequest(action, payload, signal) {
   return result;
 }
 
-export function attachDirectory(group, role, {read, apply, validate, directoryRequest}) {
-  const noun = role === "client" ? "cliente" : "entidad";
+export function attachDirectory(group, role, {read:readFields, apply, clearRepresentative, validate, directoryRequest}) {
+  const noun = role === "client" ? "mutuario" : "mutuante";
   function lookupField(key, caption, max, wide) {
     const wrapper = node("div", {className:"native-field directory-name" + (wide ? " wide" : "")});
     const label = node("label", {className:"directory-label"});
@@ -63,7 +63,7 @@ export function attachDirectory(group, role, {read, apply, validate, directoryRe
   const feedback = node("span");
   feedback.setAttribute("role", "status");
   actions.append(button, feedback);
-  group.append(actions);
+  group.closest(".group").append(actions);
 
   let available = false;
   let timer = 0;
@@ -74,6 +74,7 @@ export function attachDirectory(group, role, {read, apply, validate, directoryRe
   let anchor = name;
   let saving = false;
   let version = 0;
+  const read = (includeHiddenAddress = false) => readFields(includeHiddenAddress, selected);
 
   function message(text, error = false) {
     feedback.textContent = text;
@@ -162,6 +163,7 @@ export function attachDirectory(group, role, {read, apply, validate, directoryRe
       if (key === "id_number") writeIdentification(number, {id_type:type.value, id_number:""});
       else group.querySelector('[name="' + role + "." + key + '"]').value = "";
     }
+    clearRepresentative();
     message("Completá los datos o elegí otra ficha.");
     return true;
   }

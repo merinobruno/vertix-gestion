@@ -40,6 +40,12 @@ def bank_operation():
 
 
 class Annex(unittest.TestCase):
+    def test_transfer_loan_names_the_lender_and_its_own_cuit_separately_from_the_account_holder(self):
+        data = dict(bank_operation(), documents=["mutuo"], account_holder="Tercero Ejemplo", account_id="30-00000002-0")
+        contract = body(dict(word_documents(parse(data)))["mutuo"])
+        self.assertIn("Entidad Ficticia, CUIT 00-00000001-0, con domicilio", paragraph_text(contract[1]))
+        self.assertNotIn("30-00000002-0", paragraph_text(contract[1]))
+
     def test_imported_due_date_is_checked_against_the_contract(self):
         data = bank_operation()
         data["installments"] = import_annex(workbook([[1, "11/03/2035", 100, 0, 0, 100]]))["installments"]

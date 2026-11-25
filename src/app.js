@@ -3,13 +3,17 @@ import {attachDirectory, directoryRequest} from "./party-directory.js";
 import {setupAgenda} from "./agenda.js";
 import {addressFields, addressLine} from "./address.js";
 import {setupLegacyImport} from "./legacy-directory.js";
-import {bindIdentification, identificationProblem, readIdentification, taxKind, writeIdentification} from "./identification.js";
+import {bindIdentification, identificationProblem, numberProblem, readIdentification, taxKind, writeIdentification} from "./identification.js";
+import {decimalValue, displayDecimal} from "./decimal.js";
 
 const form = document.querySelector("#operation");
 const byId = (id) => document.getElementById(id);
 const control = (name) => form.elements.namedItem(name);
 const datePickers = new WeakMap();
-const fieldValue = (field) => (datePickers.get(field) || field).value;
+const operationCurrency = () => control("currency").value || "ARS";
+const fieldValue = (field) => field.dataset.decimal
+  ? decimalValue(field.value, field.dataset.decimal, operationCurrency()) ?? ""
+  : (datePickers.get(field) || field).value;
 const valueOf = (name) => name === "format"
   ? [...form.querySelectorAll('md-radio[name="format"]')].find(radio => radio.checked)?.value || "docx"
   : fieldValue(control(name));
@@ -48,6 +52,8 @@ function writeField(field, value) {
     picker.value = value;
     field.value = picker.value.split("-").reverse().join("/");
     field.setCustomValidity("");
+  } else if (field.dataset.decimal) {
+    field.value = displayDecimal(value, field.dataset.decimal, operationCurrency());
   } else {
     field.value = value;
   }
@@ -124,6 +130,7 @@ function addAddress(container, prefix, caption, condition) {
 
 function createParty(group) {
   const key = group.dataset.party;
+  const owner = group.closest("form");
   const natural = key === "representative" || key === "guarantor";
   const useDirectory = key === "client" || key === "entity";
   if (!useDirectory) {
@@ -149,21 +156,35 @@ function createParty(group) {
   if (useDirectory) {
     directories.push(attachDirectory(group, key, {
       directoryRequest,
-      read:(includeHiddenAddress = false) => {
+      read:(includeHiddenAddress, previous) => {
         const party = readParty(key);
         if (!includeHiddenAddress && control(key + ".address.street").disabled) delete party.address;
+        if (key === "client" && !control("represented").disabled) {
+          if (checked("represented")) party.borrower_representative = readParty("representative");
+          else if (previous?.borrower_representative) party.borrower_representative = null;
+        }
+        if (key === "entity" && !control("lender_rep_name").disabled) {
+          if (lenderRepEntered()) party.lender_representative = readLenderRepresentative(form);
+          else if (previous?.lender_representative) party.lender_representative = null;
+        }
         return party;
       },
       validate:() => validateDirectoryParty(key),
-      apply:party => { writeParty(key, party); changed = true; refresh(); },
+      apply:party => { writeParty(key, party); restoreRepresentative(key, party); changed = true; refresh(); },
+      clearRepresentative:() => { restoreRepresentative(key, {}); refresh(); },
     }));
   }
-  bindIdentification(types, control(key + ".id_number"), natural ? "DNI" : taxKind, fieldError);
+  bindIdentification(types, owner.elements.namedItem(key + ".id_number"), natural ? "DNI" : taxKind, fieldError);
 }
 
-for (const group of form.querySelectorAll("[data-party]")) createParty(group);
+for (const group of document.querySelectorAll("[data-party]")) createParty(group);
 addAddress(byId("payment-address"), "payment_address", "Domicilio de pago");
-for (const group of form.querySelectorAll("[data-treatment]")) {
+for (const group of document.querySelectorAll("[data-lender-representative]")) {
+  appendField(group, "Nombre y apellido", element("md-outlined-text-field", {name:"lender_rep_name", pattern:".{0,180}", required:true}));
+  appendField(group, "DNI", element("md-outlined-text-field", {name:"lender_rep_id", inputMode:"numeric", required:true}));
+  group.dataset.treatment = "lender_rep_title";
+}
+for (const group of document.querySelectorAll("[data-treatment]")) {
   const name = group.dataset.treatment;
   const select = element("md-outlined-select",{name});
   for (const [text,value] of [["Sr.","el Sr."],["Sra.","la Sra."]]) {
@@ -274,19 +295,20 @@ function createRow(kind, values = {}, focus = false) {
   top.append(element("b"), remove);
   const fields = element("div", {className: cheque ? "row-fields" : "row-fields installment"});
   const spec = cheque ? [["number","Nº de cheque","text"], ["bank","Banco","text"]] : [];
-  spec.push(["due","Vencimiento","date"],["amount",cheque ? "Importe nominal" : "Importe de la cuota","number"],
-    ["note_percent","Adicional del pagaré (%)","number"]);
+  spec.push(["due","Vencimiento","date"],["amount",cheque ? "Importe nominal" : "Importe de la cuota","money"],
+    ["note_percent","Adicional del pagaré (%)","percent"]);
   for (const [key,title,type] of spec) {
-    const input = element(type === "date" ? "input" : "md-outlined-text-field", {type, value: values[key] ?? (key === "note_percent" ? "0" : "")});
+    const decimal = type === "money" || type === "percent";
+    const input = element(type === "date" ? "input" : "md-outlined-text-field", {type:decimal ? "text" : type});
     if (type === "text") input.pattern = ".{0,120}";
     input.dataset.field = key;
-    if (type === "number") {
+    if (decimal) {
+      input.dataset.decimal = type;
       input.min = key === "note_percent" ? "0" : "0.01";
-      input.max = "999999999999.99";
-      input.step = "0.01";
       input.inputMode = "decimal";
       input.placeholder = "0,00";
     }
+    writeField(input, values[key] ?? (key === "note_percent" ? "0" : ""));
     appendField(fields, title, input);
   }
   const preview = element("p",{className:"note-preview",textContent:"Importe del pagaré"});
@@ -304,9 +326,10 @@ function createRow(kind, values = {}, focus = false) {
   if (!cheque) {
     const details = element("div",{className:"row-breakdown"});
     for (const [key,caption] of [["capital","Capital"],["interest","Interés"],["vat","IVA"]]) {
-      const input = element("md-outlined-text-field",{type:"number",value:values[key] ?? "",min:"0",
-        max:"999999999999.99",step:"0.01",inputMode:"decimal"});
+      const input = element("md-outlined-text-field",{min:"0",inputMode:"decimal"});
       input.dataset.field = key;
+      input.dataset.decimal = "money";
+      writeField(input, values[key] ?? "");
       appendField(details,caption,input);
     }
     fields.append(details);
@@ -372,16 +395,40 @@ function readAddress(prefix, owner = form) {
     [key, owner.elements.namedItem(prefix + "." + key).value.trim().replace(/\s+/g, " ")]));
 }
 
-function readParty(key) {
-  const party = {name:valueOf(key + ".name"), ...readIdentification(control(key + ".id_number"))};
-  if (key !== "assignee") party.address = readAddress(key + ".address");
+function readParty(key, owner = form) {
+  const party = {name:owner.elements.namedItem(key + ".name").value, ...readIdentification(owner.elements.namedItem(key + ".id_number"))};
+  if (key !== "assignee") party.address = readAddress(key + ".address", owner);
   return party;
 }
 
-function writeParty(key, party) {
-  writeField(control(key + ".name"), party.name ?? "");
-  writeIdentification(control(key + ".id_number"), party);
-  if (key !== "assignee") restoreAddress(key + ".address", party.address);
+function writeParty(key, party, owner = form) {
+  writeField(owner.elements.namedItem(key + ".name"), party.name ?? "");
+  writeIdentification(owner.elements.namedItem(key + ".id_number"), party);
+  if (key !== "assignee") restoreAddress(key + ".address", party.address, owner);
+}
+
+function readLenderRepresentative(owner) {
+  const field = key => owner.elements.namedItem("lender_rep_" + key).value;
+  return {name:field("name"), id_type:"DNI", id_number:field("id"), title:field("title")};
+}
+
+function writeLenderRepresentative(owner, rep) {
+  owner.elements.namedItem("lender_rep_name").value = rep?.name ?? "";
+  owner.elements.namedItem("lender_rep_id").value = rep?.id_number ?? "";
+  owner.elements.namedItem("lender_rep_title").value = rep?.title ?? "el Sr.";
+}
+
+function lenderRepEntered() {
+  return Boolean(valueOf("lender_rep_name").trim() || valueOf("lender_rep_id").trim());
+}
+
+function restoreRepresentative(key, party) {
+  if (key === "client") {
+    control("represented").selected = Boolean(party.borrower_representative);
+    writeParty("representative", party.borrower_representative ?? {id_type:"DNI"});
+  } else {
+    writeLenderRepresentative(form, party.lender_representative);
+  }
 }
 
 function payload(docs = selectedDocs()) {
@@ -439,8 +486,13 @@ function fieldProblem(field) {
   if (validity.valueMissing || (field.required && !field.value.trim())) {
     return field.localName === "md-outlined-select" ? "Elegí una opción." : "Completá este campo.";
   }
-  const identification = identificationProblem(field);
+  const identification = field.name === "lender_rep_id" && field.value ? numberProblem("DNI", field.value) : identificationProblem(field);
   if (identification) return identification;
+  if (field.dataset.decimal && field.value.trim()) {
+    const value = decimalValue(field.value, field.dataset.decimal, operationCurrency());
+    if (value === null) return "Ingresá un número con hasta dos decimales, por ejemplo 1.234,56.";
+    if (Number(value) < Number(field.min)) return "El mínimo es " + displayDecimal(field.min, field.dataset.decimal) + ".";
+  }
   if (validity.valid) {
     if (field.name?.endsWith(".province") && [...addressLine(readAddress(field.name.slice(0, -".province".length), field.closest("form")))].length > 240) {
       return "El domicilio completo supera los 240 caracteres.";
@@ -483,12 +535,14 @@ function fieldError(field, message) {
 }
 
 function validateDirectoryParty(key) {
-  const parts = ["name", "id_type", "id_number", ...Object.keys(addressFields).map(part => "address." + part)];
-  for (const part of parts) {
-    const field = control(key + "." + part);
+  const fields = partyKey => [...form.querySelector('[data-party="' + partyKey + '"]').querySelectorAll(editable)];
+  const inputs = fields(key);
+  if (key === "client" && checked("represented")) inputs.push(...fields("representative"));
+  if (key === "entity" && lenderRepEntered()) inputs.push(...form.querySelectorAll("[data-lender-representative] [name]"));
+  for (const field of inputs) {
     if (field.disabled) continue;
     let message = fieldProblem(field);
-    if (part === "id_number" && !field.value.trim()) message = "Completá el número para guardar la ficha.";
+    if (field.name === key + ".id_number" && !field.value.trim()) message = "Completá el número para guardar la ficha.";
     if (message) {
       fieldError(field, message);
       field.focus();
@@ -537,7 +591,7 @@ function refresh() {
   const docs = selectedDocs();
   const available = supported(docs);
   const f = flagsFor(available);
-  const currency = valueOf("currency") || "ARS";
+  const currency = operationCurrency();
   const fmt = moneyFormat(currency);
   byId("values-tab-label").textContent = f.demand ? (f.transfer ? "Cheques e importe" : "Importe") : f.bank && !f.transfer ? "Cuotas" : "Cheques y cuotas";
   for (const box of form.querySelectorAll('md-checkbox[name="documents"]')) {
@@ -551,7 +605,7 @@ function refresh() {
     if (node.closest("[data-condition]")) node.disabled = Boolean(node.closest("[data-condition][hidden], [data-removing]"));
   }
   control("client.id_number").required = f.loan && !f.rep;
-  control("entity.id_number").required = f.bankLoan || (f.notes && !f.beneficiary) || (f.transfer && !f.assignee);
+  control("entity.id_number").required = f.entity;
   control("account_holder").required = f.bankLoan && Boolean(valueOf("account_id").trim());
   control("account_id").required = f.bankLoan && Boolean(valueOf("account_holder").trim());
   const issueDate = valueOf("issue_date");
@@ -574,7 +628,7 @@ function refresh() {
       percentField.hidden = !needsPercent;
       const preview = row.querySelector(".note-preview");
       preview.hidden = !needsPercent;
-      preview.querySelector("strong").textContent = notePreview(row.querySelector('[data-field="amount"]').value, percentField.value, fmt);
+      preview.querySelector("strong").textContent = notePreview(fieldValue(row.querySelector('[data-field="amount"]')), fieldValue(percentField), fmt);
       const reference = row.querySelector(".note-reference");
       if (reference) reference.hidden = !needsPercent || percentField.value !== "";
       for (const input of inputs) {
@@ -716,7 +770,7 @@ async function importFile(file) {
     control("linked").selected = false;
     byId("installments").replaceChildren();
     for (const item of result.installments) createRow("installments",item);
-    if (result.principal != null || capital === importedPrincipal) control("bank_principal").value = result.principal ?? "";
+    if (result.principal != null || capital === importedPrincipal) writeField(control("bank_principal"), result.principal ?? "");
     importedPrincipal = result.principal;
     changed = true;
     const unresolved = result.installments.some(item => item.note_percent === "");
@@ -752,6 +806,17 @@ drop.addEventListener("drop",event => {
 for (const [id,kind] of [["add-cheque","cheques"],["add-installment","installments"]]) {
   byId(id).addEventListener("click",() => {createRow(kind,{},true); changed = true; refresh();});
 }
+form.addEventListener("focusout", event => {
+  const field = event.target;
+  if (field.dataset?.decimal) writeField(field, field.value);
+});
+form.addEventListener("paste", event => {
+  const field = event.target;
+  if (field.dataset?.decimal && /[\t\r\n]/.test(event.clipboardData.getData("text/plain").trim())) {
+    event.preventDefault();
+    fieldError(field, "Pegá una sola celda de Excel en este campo.");
+  }
+});
 for (const eventType of ["input","change"]) {
   form.addEventListener(eventType,event => {
     if (event.target !== control("combined_document")) changed = true;
@@ -771,7 +836,7 @@ async function verifyService() {
   const response = await fetch("/api/health", {cache:"no-store"});
   if (!response.ok) throw new Error("No se pudo verificar el servicio.");
   const health = await response.json();
-  const currentService = health.service === "panel-documental" && health.identification_formats === true;
+  const currentService = health.service === "panel-documental" && health.identification_formats === true && health.agenda_representatives === true;
   const localDirectory = localPanel && currentService && health.party_directory === true && health.directory_editor === true;
   const sharedDirectory = currentService && health.shared_directory === true;
   directoryAvailable = localDirectory || sharedDirectory;
@@ -808,9 +873,9 @@ function legacyAddressParts(line) {
   return parts;
 }
 
-function restoreAddress(prefix, saved) {
+function restoreAddress(prefix, saved, owner = form) {
   const parts = typeof saved === "string" ? legacyAddressParts(saved) : saved;
-  for (const key of Object.keys(addressFields)) writeField(control(prefix + "." + key), parts?.[key] ?? "");
+  for (const key of Object.keys(addressFields)) writeField(owner.elements.namedItem(prefix + "." + key), parts?.[key] ?? "");
 }
 
 function restoreOperation(saved) {
@@ -825,7 +890,7 @@ function restoreOperation(saved) {
     control(key).selected = Boolean(saved[key]);
   }
   control("linked").selected = saved.installments_mode === "cheques";
-  if (saved.cheque_net != null) control("net").value = saved.cheque_net;
+  if (saved.cheque_net != null) writeField(control("net"), saved.cheque_net);
   restoreAddress("payment_address", saved.payment_address);
   for (const key of ["client","entity","representative","beneficiary","assignee","guarantor"]) {
     if (!saved[key]) continue;
@@ -851,7 +916,7 @@ byId("open-service").addEventListener("click",() => {
 window.addEventListener("message", event => {
   if (!companion || event.origin !== companion.origin) return;
   if (event.source === migrationWindow && event.data?.type === "panel-ready") {
-    if (!event.data.structured_addresses || !event.data.directory_editor || !event.data.identification_formats) {
+    if (!event.data.structured_addresses || !event.data.directory_editor || !event.data.identification_formats || !event.data.agenda_representatives) {
       statusMessage("La otra pestaña también necesita la versión actualizada del panel.", true);
       return;
     }
@@ -894,7 +959,8 @@ form.addEventListener("submit",async event => {
   }
 });
 
-const agenda = setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest});
+const agenda = setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest, readParty, writeParty,
+  readLenderRepresentative, writeLenderRepresentative});
 const enableImport = setupLegacyImport(directoryRequest, agenda.reload);
 agenda.setAvailable(true);
 enableNumericDate(control("issue_date"));
@@ -907,6 +973,6 @@ Promise.all([...form.querySelectorAll("md-outlined-select")].map(node => node.up
   refresh();
   if (await verifyService() && directoryAvailable && companion && location.hash === "#continuar" && window.opener) {
     window.opener.postMessage({type:"panel-ready", structured_addresses:true, party_directory:true, directory_editor:true,
-      identification_formats:true},companion.origin);
+      identification_formats:true, agenda_representatives:true},companion.origin);
   }
 }).catch(() => statusMessage("No se pudo verificar el servicio. Volvé a intentar.",true));

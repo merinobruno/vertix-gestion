@@ -5,7 +5,8 @@ foreach ($port in $ports) {
     try {
         $health = Invoke-RestMethod -Uri "$url/api/health" -TimeoutSec 2
         if ($health.service -eq 'panel-documental' -and $health.annex_import -eq $true -and
-            $health.shared_directory -eq $true -and $health.pdf_export -eq $true -and $health.identification_formats -eq $true) {
+            $health.shared_directory -eq $true -and $health.agenda_representatives -eq $true -and
+            $health.pdf_export -eq $true -and $health.identification_formats -eq $true) {
             Start-Process "$url/"
             exit 0
         }

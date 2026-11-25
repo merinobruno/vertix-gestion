@@ -23,10 +23,34 @@ PAGES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/plantilla-anexo-i.xlsx": ("plantilla-anexo-i.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
 
 
+def needs_representative_support(path, data):
+    if path not in ("/api/agenda/save", "/api/agenda/update", "/api/agenda/import"):
+        return False
+    try:
+        body = json.loads(data)
+    except (ValueError, RecursionError) as exc:
+        raise ApiError(422, "Los datos de la ficha son inválidos.") from exc
+    if not isinstance(body, dict):
+        return False
+    parties = body.get("parties") if path == "/api/agenda/import" else [body.get("party")]
+    return isinstance(parties, list) and any(isinstance(party, dict) and
+        ("borrower_representative" in party or "lender_representative" in party) for party in parties)
+
+
 def relay_directory(path, data):
     unavailable = "No se pudo conectar con la agenda compartida. Volvé a intentar."
     connection = http.client.HTTPSConnection(HOSTED_PANEL, timeout=20)
     try:
+        if needs_representative_support(path, data):
+            # An older hosted panel accepts a contact but silently drops its representatives.
+            connection.request("GET", "/api/health")
+            health = connection.getresponse()
+            raw = health.read(4097)
+            if health.status != 200 or len(raw) > 4096:
+                raise ApiError(503, unavailable)
+            capabilities = json.loads(raw)
+            if not isinstance(capabilities, dict) or capabilities.get("agenda_representatives") is not True:
+                raise ApiError(503, "La agenda compartida todavía necesita actualizarse para guardar representantes.")
         connection.request("POST", path, body=data, headers={"Origin": "https://" + HOSTED_PANEL, "Content-Type": "application/json"})
         response = connection.getresponse()
         raw = response.read(196609)

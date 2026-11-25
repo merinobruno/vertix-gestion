@@ -56,9 +56,9 @@
                   <md-select-option value="cheques" selected><div slot="headline">Cheques electrónicos</div></md-select-option>
                   <md-select-option value="bank"><div slot="headline">Transferencia bancaria</div></md-select-option>
                 </md-outlined-select>
-                <md-outlined-text-field data-condition="chequeLoan" label="Importe neto entregado" type="number" name="net" min="0.01" max="999999999999.99" step="0.01" inputmode="decimal" required></md-outlined-text-field>
-                <md-outlined-text-field data-condition="bankLoan" label="Capital del préstamo" type="number" name="bank_principal" min="0.01" max="999999999999.99" step="0.01" inputmode="decimal" required></md-outlined-text-field>
-                <md-outlined-text-field data-condition="loan" label="Tasa punitoria mensual (%)" type="number" name="penalty" min="0" step="0.01" inputmode="decimal" required></md-outlined-text-field>
+                <md-outlined-text-field data-condition="chequeLoan" label="Importe neto entregado" data-decimal="money" name="net" min="0.01" inputmode="decimal" placeholder="0,00" required></md-outlined-text-field>
+                <md-outlined-text-field data-condition="bankLoan" label="Capital del préstamo" data-decimal="money" name="bank_principal" min="0.01" inputmode="decimal" placeholder="0,00" required></md-outlined-text-field>
+                <md-outlined-text-field data-condition="loan" label="Tasa punitoria mensual (%)" data-decimal="percent" name="penalty" min="0" inputmode="decimal" required></md-outlined-text-field>
                 <div class="wide" data-condition="bankLoan"><md-outlined-button type="button" id="choose-principal-annex">Importar capital y cuotas desde Excel</md-outlined-button>
                   <p class="notice" role="status" id="principal-annex-status" hidden></p></div>
               </div>
@@ -68,24 +68,22 @@
                 <md-outlined-text-field label="Tipo de cuenta" name="account_type" value="Cta. Cte." required></md-outlined-text-field>
                 <md-outlined-text-field label="Número de cuenta" name="account_number" required></md-outlined-text-field>
                 <md-outlined-text-field label="CBU" name="cbu" inputmode="numeric" maxlength="22" pattern="[0-9]{22}" required></md-outlined-text-field>
-                <md-outlined-text-field label="Titular, si difiere de la entidad" name="account_holder"></md-outlined-text-field>
+                <md-outlined-text-field label="Titular, si difiere del mutuante" name="account_holder"></md-outlined-text-field>
                 <md-outlined-text-field label="CUIT de ese titular" name="account_id"></md-outlined-text-field>
               </div></div>
             </div>
             <div class="tab-body" id="partes" role="tabpanel" aria-labelledby="tab-partes" hidden inert>
-              <div class="group" data-condition="loan"><h2>Cliente</h2><div class="field-grid party" role="group" aria-label="Cliente" data-party="client"></div>
+              <div class="group" data-condition="loan"><h2 id="borrower-label">Mutuario (quien recibe)</h2><div class="field-grid party" role="group" aria-labelledby="borrower-label" data-party="client"></div>
                 <div data-condition="bankLoan" class="field-grid" data-treatment="borrower_title"></div>
                 <label class="toggle" data-condition="chequeLoan"><md-switch name="represented" aria-label="Firma un representante"></md-switch>Firma un representante</label>
                 <div class="subgroup" data-condition="rep"><div class="field-grid party" role="group" aria-label="Representante" data-party="representative"></div></div>
               </div>
-              <div class="group" data-condition="entity"><h2>Entidad</h2><div class="field-grid party" role="group" aria-label="Entidad" data-party="entity"></div></div>
-              <div class="group" data-condition="bankLoan"><h2>Representante de la entidad</h2><div class="field-grid" data-treatment="lender_rep_title">
-                <md-outlined-text-field label="Nombre y apellido" name="lender_rep_name" required></md-outlined-text-field>
-                <md-outlined-text-field label="DNI" name="lender_rep_id" required></md-outlined-text-field>
-              </div></div>
+              <div class="group" data-condition="entity"><h2 id="lender-label">Mutuante (quien presta)</h2><div class="field-grid party" role="group" aria-labelledby="lender-label" data-party="entity"></div>
+                <div class="subgroup" data-condition="bankLoan"><h3>Representante del mutuante</h3><div class="field-grid" data-lender-representative></div></div>
+              </div>
               <div class="group" data-condition="guaranteeLoan"><h2>Garante</h2><div class="field-grid party" role="group" aria-label="Garante" data-party="guarantor"></div><div class="field-grid" data-treatment="guarantor_title"></div></div>
               <div class="group" data-condition="notes"><h2>Pagaré</h2>
-                <label class="toggle"><md-switch name="different_beneficiary" aria-label="Beneficiario distinto de la entidad"></md-switch>Beneficiario distinto de la entidad</label>
+                <label class="toggle"><md-switch name="different_beneficiary" aria-label="Beneficiario distinto del mutuante"></md-switch>Beneficiario distinto del mutuante</label>
                 <div class="subgroup" data-condition="beneficiary"><div class="field-grid party" role="group" aria-label="Beneficiario" data-party="beneficiary"></div></div>
                 <label class="toggle"><md-switch name="separate_payment" aria-label="Usar otro domicilio de pago"></md-switch>Usar otro domicilio de pago</label>
                 <div class="subgroup" data-condition="payment" id="payment-address"></div>
@@ -95,7 +93,7 @@
                   <md-outlined-text-field label="DNI" name="demand_id" pattern=".{0,40}" required></md-outlined-text-field></div>
               </div>
               <div class="group" data-condition="transfer"><h2>Cesión</h2>
-                <label class="toggle"><md-switch name="different_assignee" aria-label="Cesionario distinto de la entidad"></md-switch>Cesionario distinto de la entidad</label>
+                <label class="toggle"><md-switch name="different_assignee" aria-label="Cesionario distinto del mutuante"></md-switch>Cesionario distinto del mutuante</label>
                 <div class="subgroup" data-condition="assignee"><div class="field-grid party" role="group" aria-label="Cesionario" data-party="assignee"></div></div>
               </div>
             </div>
@@ -115,7 +113,7 @@
               <div class="group" data-condition="cheques"><div class="section-line"><h2>Cheques</h2><md-text-button type="button" id="add-cheque"><svg slot="icon" class="icon" aria-hidden="true"><use href="#m3-add"></use></svg>Agregar cheque</md-text-button></div><div id="cheques"></div></div>
               <div class="group" data-condition="independent"><div class="section-line"><h2>Cuotas</h2><md-text-button type="button" id="add-installment"><svg slot="icon" class="icon" aria-hidden="true"><use href="#m3-add"></use></svg>Agregar cuota</md-text-button></div><div id="installments"></div></div>
               <div class="group" data-condition="demand"><div class="field-grid">
-                <md-outlined-text-field label="Importe del pagaré a la vista" name="demand_amount" type="number" min="0.01" max="999999999999.99" step="0.01" inputmode="decimal" required></md-outlined-text-field>
+                <md-outlined-text-field label="Importe del pagaré a la vista" name="demand_amount" data-decimal="money" min="0.01" inputmode="decimal" placeholder="0,00" required></md-outlined-text-field>
                 <md-outlined-text-field label="Concepto del valor recibido" name="demand_consideration" pattern=".{0,240}" required></md-outlined-text-field>
               </div></div>
               <p class="notice" id="no-values" hidden>Elegí al menos un documento.</p>
@@ -160,7 +158,7 @@
         <p id="agenda-feedback" role="status" hidden></p>
         <p id="agenda-status" role="status" aria-live="polite"></p>
         <md-text-button id="agenda-retry" type="button" hidden>Volver a intentar</md-text-button>
-        <ul id="agenda-list" aria-label="Fichas de clientes y entidades"></ul>
+        <ul id="agenda-list" aria-label="Fichas de mutuarios y mutuantes"></ul>
         <div id="agenda-pages" class="agenda-actions" hidden>
           <md-outlined-button id="agenda-prev" type="button">Anterior</md-outlined-button>
           <md-outlined-button id="agenda-next" type="button">Siguiente</md-outlined-button>
@@ -179,6 +177,10 @@
           <md-outlined-text-field name="id_number" label="Número de identificación" inputmode="numeric" pattern=".{0,40}" required></md-outlined-text-field>
           <div class="wide" id="agenda-address"></div>
         </div>
+        <label class="toggle"><md-switch name="has_borrower_rep" aria-label="Representante del mutuario"></md-switch>Representante del mutuario</label>
+        <div class="subgroup" data-agenda-rep="has_borrower_rep" hidden><div class="field-grid party" role="group" aria-label="Representante del mutuario" data-party="representative"></div></div>
+        <label class="toggle"><md-switch name="has_lender_rep" aria-label="Representante del mutuante"></md-switch>Representante del mutuante</label>
+        <div class="subgroup" data-agenda-rep="has_lender_rep" hidden><div class="field-grid" data-lender-representative></div></div>
         <p id="agenda-editor-status" role="alert" hidden></p>
         <div class="agenda-actions"><md-filled-button type="submit" id="agenda-save">Guardar cambios</md-filled-button>
           <md-text-button type="button" id="agenda-cancel">Cancelar</md-text-button></div>

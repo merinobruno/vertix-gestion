@@ -11,16 +11,24 @@ function byDocument(db, record) {
 }
 
 function complete(record, existing) {
-  const profile = {...record.profile, address:record.profile.address ?? existing?.profile.address ?? {}};
+  const profile = {address:{}, ...existing?.profile, ...record.profile};
+  for (const key of ["borrower_representative", "lender_representative"]) {
+    if (profile[key] === null) delete profile[key];
+  }
   if (existing && existing.kind === "CUIT/CUIL" && record.kind === existing.kind && record.digits === existing.digits) {
     profile.id_type = existing.profile.id_type;
   }
   return {...record, profile, revision:(existing?.revision || 0) + 1};
 }
 
+function sameContact(left, right) {
+  return ["name", "id_type", "id_number", "title"].every(key => left?.[key] === right?.[key])
+    && ["street","number","floor","apartment","locality","province"].every(key => (left?.address?.[key] || "") === (right?.address?.[key] || ""));
+}
+
 function sameProfile(left, right) {
-  if (left.name !== right.name || left.id_type !== right.id_type || left.id_number !== right.id_number) return false;
-  return ["street","number","floor","apartment","locality","province"].every(key => (left.address?.[key] || "") === (right.address?.[key] || ""));
+  return sameContact(left, right) && sameContact(left.borrower_representative, right.borrower_representative)
+    && sameContact(left.lender_representative, right.lender_representative);
 }
 
 // The indexed document lookup and subsequent write belong to the same serializable mutation.

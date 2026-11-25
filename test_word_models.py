@@ -53,6 +53,19 @@ def operation():
 
 
 class WordModels(unittest.TestCase):
+    def test_cheque_loan_alone_prints_and_requires_the_lenders_own_id(self):
+        data = dict(operation(), documents=["mutuo"], net="1.234,56", penalty="2,50")
+        data["entity"].update(id_number="30712345678")
+        contract = body(dict(word_documents(parse(data)))["mutuo"])
+        self.assertIn("Entidad Ficticia, CUIT 30-71234567-8, con domicilio", paragraph_text(contract[1]))
+        self.assertIn("1.234,56", paragraph_text(contract))
+        for invalid in ("12.34,56", "1,234", "1.23.456"):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "dos decimales"):
+                parse(dict(data, net=invalid))
+        del data["entity"]["id_number"]
+        with self.assertRaisesRegex(ValueError, "identificación de la parte mutuante"):
+            parse(data)
+
     def test_combined_and_known_tax_labels_preserve_all_digits_in_the_generated_model(self):
         for kind in ("CUIT", "CUIL", "CUIT/CUIL"):
             with self.subTest(kind=kind):
@@ -81,7 +94,7 @@ class WordModels(unittest.TestCase):
     def test_required_and_legacy_addresses(self):
         data = operation()
         for key in ("street", "number", "locality", "province"):
-            with self.subTest(missing=key), self.assertRaisesRegex(ValueError, "domicilio de la parte cliente"):
+            with self.subTest(missing=key), self.assertRaisesRegex(ValueError, "domicilio de la parte mutuaria"):
                 data["client"]["address"] = dict(example_address("San Jorge", "111"), **{key:" "})
                 parse(data)
         for line in ("San Jorge 111", "San Jorge 111, Neuquén", "San Jorge 111, piso 3, Neuquén"):

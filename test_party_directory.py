@@ -8,7 +8,7 @@ from contextlib import closing, contextmanager
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from party_directory import list_parties, save, search, update
 from server import HOSTED_PANEL, Panel
@@ -55,6 +55,48 @@ class PartyDirectory(unittest.TestCase):
         self.path = Path(folder.name) / "agenda.sqlite3"
         self.party = {"name":"Álamo de Prueba", "id_type":"DNI", "id_number":"00.000.111",
                       "address":dict(example_address("Calle de Prueba", "8"), floor="2", apartment="B")}
+
+    def test_both_representatives_survive_reload_and_edits_from_another_role(self):
+        borrower = dict(self.party, name="Firmante Uno", id_number="00000123")
+        lender = {"name":"Firmante Dos", "id_number":"00000456", "title":"la Sra."}
+        with local_panel(self.path) as port:
+            code, result = request(port, "/api/agenda/save", {"party":dict(self.party, borrower_representative=borrower)})
+            self.assertEqual(code, 200)
+            original = result["party"]
+        with local_panel(self.path) as port:
+            def edit(party, fields):
+                return request(port, "/api/agenda/update", {"id":party["id"], "revision":party["revision"],
+                                                            "party":dict(self.party, **fields)})
+            code, result = edit(original, {"lender_representative":lender})
+            self.assertEqual(code, 200)
+            loaded, = request(port, "/api/agenda/search", {"query":"Álamo"})[1]["parties"]
+            self.assertEqual(loaded, result["party"])
+            self.assertEqual(loaded["borrower_representative"], dict(borrower, id_number="00.000.123"))
+            self.assertEqual(loaded["lender_representative"], dict(lender, id_type="DNI", id_number="00.000.456"))
+            self.assertEqual(edit(loaded, {"borrower_representative":dict(borrower, address={})})[0], 422)
+            self.assertEqual(edit(original, {"lender_representative":None})[0], 409)
+            code, result = edit(loaded, {"borrower_representative":None})
+            self.assertEqual(code, 200)
+            self.assertNotIn("borrower_representative", result["party"])
+            self.assertEqual(result["party"]["lender_representative"], loaded["lender_representative"])
+
+    def test_desktop_checks_shared_support_before_sending_a_representative(self):
+        party = dict(self.party, borrower_representative=self.party)
+        with local_panel(None) as port, patch("server.http.client.HTTPSConnection") as connect:
+            upstream = connect.return_value
+            old = Mock(status=200)
+            old.read.return_value = b'{"shared_directory":true}'
+            upstream.getresponse.return_value = old
+            status, message = request(port, "/api/agenda/save", {"party":party})
+            self.assertEqual(status, 503)
+            self.assertIn("actualizarse", message["error"])
+            upstream.request.assert_called_once_with("GET", "/api/health")
+            current, saved = Mock(status=200), Mock(status=200)
+            current.read.return_value = b'{"agenda_representatives":true}'
+            saved.read.return_value = json.dumps({"party":party}).encode()
+            upstream.getresponse.side_effect = (current, saved)
+            self.assertEqual(request(port, "/api/agenda/save", {"party":party}), (200, {"party":party}))
+            self.assertEqual(upstream.request.call_args.args, ("POST", "/api/agenda/save"))
 
     def test_normal_desktop_uses_the_hosted_directory(self):
         with local_panel(None) as port, patch("server.http.client.HTTPSConnection") as connect:

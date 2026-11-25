@@ -49,9 +49,13 @@ def number_words(number):
 
 def money_value(value, label, *, allow_zero=False):
     s = str(value or "").strip() if value != 0 else "0"
-    if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    if not re.fullmatch(r"\d{1,12}(?:\.\d{1,2})?", s):
+    if isinstance(value, str):
+        if re.fullmatch(r"[0-9]{1,3}(?:\.[0-9]{3})+(?:,[0-9]{1,2})?", s):
+            s = s.replace(".", "")
+        elif re.fullmatch(r"[0-9]{1,3}(?:,[0-9]{3})+\.[0-9]{1,2}", s):
+            s = s.replace(",", "")
+        s = s.replace(",", ".")
+    if not re.fullmatch(r"[0-9]{1,12}(?:\.[0-9]{1,2})?", s):
         raise ValueError(f"Revisá {label}. Usá un número con hasta dos decimales.")
     amount = Decimal(s)
     if not allow_zero and amount <= 0:
@@ -160,15 +164,15 @@ def bank_fields(raw, entity):
     holder = field(raw.get("account_holder"), "el titular de la cuenta", False)
     holder_id = field(raw.get("account_id"), "el CUIT del titular de la cuenta", False)
     if bool(holder) != bool(holder_id):
-        raise ValueError("Completá el nombre y el CUIT del titular de la cuenta, o dejá ambos vacíos para usar la entidad.")
+        raise ValueError("Completá el nombre y el CUIT del titular de la cuenta, o dejá ambos vacíos para usar los del mutuante.")
     return {"bank_name": field(raw.get("bank_name"), "el banco"), "cbu": cbu,
             "account_type": field(raw.get("account_type"), "el tipo de cuenta"),
             "account_number": field(raw.get("account_number"), "el número de cuenta"),
             "account_holder": holder or company_name(entity, "S.A."),
             "account_id": holder_id or entity["id_number"], "account_id_kind": "CUIT" if holder else entity["id_type"],
             "lender_rep_title": title(raw.get("lender_rep_title"), "el Sr."),
-            "lender_rep_name": field(raw.get("lender_rep_name"), "quien representa a la entidad"),
-            "lender_rep_id": field(raw.get("lender_rep_id"), "el DNI de quien representa a la entidad")}
+            "lender_rep_name": field(raw.get("lender_rep_name"), "quien representa al mutuante"),
+            "lender_rep_id": formatted_number("DNI", field(raw.get("lender_rep_id"), "el DNI de quien representa al mutuante"))}
 
 
 def parse(raw):
@@ -202,16 +206,15 @@ def parse(raw):
           "issue_date": calendar_day(raw.get("issue_date"), "la fecha de emisión"),
           "place": field(raw.get("place"), "el lugar de emisión")}
     own_entity = loan or (notes and not raw.get("different_beneficiary")) or (transfer and not raw.get("different_assignee"))
-    entity_id = (bank and loan) or (notes and not raw.get("different_beneficiary")) or (transfer and not raw.get("different_assignee"))
-    entity = party(raw.get("entity"), "la entidad", id_required=entity_id,
+    entity = party(raw.get("entity"), "la parte mutuante",
                    address_required=loan or (notes and not raw.get("different_beneficiary") and not raw.get("separate_payment"))) if own_entity else None
     op["entity"] = entity
     if loan:
         represented = bool(raw.get("represented"))
         if bank and represented:
-            raise ValueError("La plantilla de transferencia está redactada para un cliente que firma en nombre propio.")
-        op["client"] = party(raw.get("client"), "la parte cliente", address_required=not represented, id_required=not represented)
-        op["representative"] = party(raw.get("representative"), "quien representa al cliente", address_required=True) if represented else None
+            raise ValueError("La plantilla de transferencia requiere que el mutuario firme en nombre propio.")
+        op["client"] = party(raw.get("client"), "la parte mutuaria", address_required=not represented, id_required=not represented)
+        op["representative"] = party(raw.get("representative"), "quien representa al mutuario", address_required=True) if represented else None
         op["net"] = money_value(raw.get("net"), "el capital del préstamo" if bank else "el importe neto entregado")
         op["penalty"] = money_value(raw.get("penalty"), "la tasa punitoria mensual", allow_zero=True)
         if bank:
@@ -289,6 +292,7 @@ def word_pieces(op):
             penalty = penalty.rstrip("0").rstrip(".")
         loan = {**values, **amount_fields(op["net"]),
                 "lender_name": company_name(op["entity"], "SA"), "lender_address": op["entity"]["address"],
+                "lender_id_kind": op["entity"]["id_type"], "lender_id": op["entity"]["id_number"],
                 "borrower_intro": "el Sr. " if representative or signer["id_type"] == "DNI" else "",
                 "borrower_name": signer["name"], "borrower_id_kind": "D.N.I." if signer["id_type"] == "DNI" else signer["id_type"],
                 "borrower_id": signer["id_number"], "borrower_address": signer["address"],
@@ -297,7 +301,6 @@ def word_pieces(op):
                 "penalty": penalty.replace(".", ",")}
         if op["bank"]:
             loan.update(op["bank_fields"], lender_name=company_name(op["entity"], "S.A."),
-                        lender_id_kind=op["entity"]["id_type"], lender_id=op["entity"]["id_number"],
                         borrower_intro=op["borrower_title"] + " ")
         if op["guarantee"]:
             person = op["guarantor"]

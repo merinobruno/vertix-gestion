@@ -1,6 +1,7 @@
 import {bindIdentification, displayNumber, readIdentification, taxKind, writeIdentification} from "./identification.js";
 
-export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest}) {
+export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest, readParty, writeParty,
+  readLenderRepresentative, writeLenderRepresentative}) {
   const byId = id => document.getElementById(id);
   const tabs = byId("workspace-tabs");
   const opTab = byId("tab-operation");
@@ -48,6 +49,13 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     for (const key of components) field("address." + key).required = required && key !== "floor" && key !== "apartment";
   }
 
+  function toggleRepresentativeFields() {
+    for (const group of edit.querySelectorAll("[data-agenda-rep]")) {
+      group.hidden = !field(group.dataset.agendaRep).selected;
+      for (const input of group.querySelectorAll("[name]")) input.disabled = group.hidden;
+    }
+  }
+
   function openEditor(party = {name:"", id_type:taxKind, id_number:""}) {
     stopListRequest();
     feedback.hidden = true;
@@ -55,6 +63,11 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     field("name").value = party.name;
     writeIdentification(field("id_number"), party);
     for (const key of components) field("address." + key).value = party.address?.[key] || "";
+    field("has_borrower_rep").selected = Boolean(party.borrower_representative);
+    field("has_lender_rep").selected = Boolean(party.lender_representative);
+    writeParty("representative", party.borrower_representative ?? {id_type:"DNI"}, edit);
+    writeLenderRepresentative(edit, party.lender_representative);
+    toggleRepresentativeFields();
     for (const input of edit.querySelectorAll("[data-reported]")) fieldError(input, "");
     setAddressRequirements();
     editorMessage("");
@@ -193,9 +206,10 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
   byId("agenda-prev").addEventListener("click", () => load(Math.max(0, pageOffset - pageSize)));
   byId("agenda-next").addEventListener("click", () => load(pageOffset + pageLength));
   byId("agenda-cancel").addEventListener("click", () => returnToList());
+  edit.addEventListener("change", toggleRepresentativeFields);
   edit.addEventListener("input", () => {
     setAddressRequirements();
-    for (const input of edit.querySelectorAll("[data-reported]")) fieldError(input, fieldProblem(input));
+    for (const input of edit.querySelectorAll("[data-reported]")) fieldError(input, input.disabled ? "" : fieldProblem(input));
   });
   edit.addEventListener("submit", async event => {
     event.preventDefault();
@@ -203,11 +217,16 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     const selected = editing;
     setAddressRequirements();
     for (const input of edit.querySelectorAll("md-outlined-text-field, md-outlined-select")) {
+      if (input.disabled) continue;
       const problem = fieldProblem(input);
       if (problem) { fieldError(input, problem); input.focus(); return; }
     }
     const party = {name:field("name").value, ...readIdentification(field("id_number"))};
     party.address = Object.fromEntries(components.map(key => [key, field("address." + key).value]));
+    if (field("has_borrower_rep").selected) party.borrower_representative = readParty("representative", edit);
+    else if (selected.borrower_representative) party.borrower_representative = null;
+    if (field("has_lender_rep").selected) party.lender_representative = readLenderRepresentative(edit);
+    else if (selected.lender_representative) party.lender_representative = null;
     saving = true;
     edit.inert = true;
     editorMessage("");

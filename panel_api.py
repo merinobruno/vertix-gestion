@@ -33,7 +33,7 @@ def service_info(*, pdf_export, party_directory=False, shared_directory=False):
     return {"status": "ok", "service": "panel-documental", "template_fidelity": True, "demand_note": True,
             "combined_document": True, "annex_import": True, "structured_addresses": True,
             "party_directory": party_directory, "directory_editor": party_directory, "browser_directory": False,
-            "shared_directory": shared_directory,
+            "shared_directory": shared_directory, "agenda_representatives": True,
             "identification_formats": True,
             "pdf_export": pdf_export}
 

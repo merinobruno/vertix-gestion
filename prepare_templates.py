@@ -44,6 +44,8 @@ def loan_master(body):
                   (172, 178, "borrower_id_kind"), (181, 191, "borrower_id"),
                   (215, 256, "borrower_address"), (256, 279, "representation"),
                   (279, 290, "represented_name")])
+    introduction = next(t for t in body[1].iter(T) if t.text == " con domicilio en ")
+    introduction.text = f", {MARKERS['lender_id_kind']} {MARKERS['lender_id']}, con domicilio en "
     mark(body[2], [(54, 67, "amount_digits"), (88, 155, "amount_words"), (160, 162, "cents")])
     mark(body[3], [(90, 91, "penalty")])
     mark(body[6], [(86, 87, "count"), (89, 92, "count_words")])

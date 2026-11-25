@@ -7,7 +7,7 @@ import unicodedata
 from contextlib import closing
 from pathlib import Path
 
-from documents import address_text, field
+from documents import address_text, field, title
 from identification import TAX_KIND, document_digits, formatted_number, id_group
 
 
@@ -85,7 +85,7 @@ def list_parties(path, query, offset=0):
     return {"parties":parties, "total":total, "offset":offset, "page_size":PAGE_SIZE}
 
 
-def validated_party(party, *, allow_empty_address=False):
+def contact_identity(party):
     if not isinstance(party, dict):
         raise ValueError("Completá los datos de la ficha.")
     name = field(party.get("name"), "el nombre o la razón social")
@@ -93,23 +93,43 @@ def validated_party(party, *, allow_empty_address=False):
         raise ValueError("Usá hasta 180 caracteres en el nombre.")
     kind = party.get("id_type")
     number = formatted_number(kind, field(party.get("id_number"), "el número de identificación"))
-    document = document_digits(number)
-    address = None
+    return {"name": name, "id_type": kind, "id_number": number}
+
+
+def directory_address(value, label, *, allow_empty=False):
+    if not isinstance(value, dict):
+        raise ValueError(f"Completá el {label} por campos.")
+    address = {key: field(value.get(key), label, False)
+               for key in ("street", "number", "floor", "apartment", "locality", "province")}
+    if allow_empty and not any(address.values()):
+        return {}
+    address_text(address, label)
+    return address
+
+
+def validated_party(party, *, allow_empty_address=False):
+    profile = contact_identity(party)
     if "address" in party:
-        value = party["address"]
-        if not isinstance(value, dict):
-            raise ValueError("Completá el domicilio por campos.")
-        address = {key: field(value.get(key), "el domicilio", False)
-                   for key in ("street", "number", "floor", "apartment", "locality", "province")}
-        if allow_empty_address and not any(address.values()):
-            address = {}
+        profile["address"] = directory_address(party["address"], "domicilio de la ficha", allow_empty=allow_empty_address)
+    for key in ("borrower_representative", "lender_representative"):
+        if key not in party:
+            continue
+        rep = party[key]
+        if rep is None:
+            profile[key] = None
+        elif not isinstance(rep, dict):
+            raise ValueError("Completá los datos del representante.")
+        elif key == "borrower_representative":
+            profile[key] = {**contact_identity(rep),
+                            "address": directory_address(rep.get("address"), "domicilio del representante")}
         else:
-            address_text(address, "domicilio de la ficha")
-    return {"name": name, "id_type": kind, "id_number": number}, document, address
+            profile[key] = {**contact_identity({**rep, "id_type": "DNI"}), "title": title(rep.get("title"), "el Sr.")}
+    return profile
 
 
 def save(path, party, *, create_only=False, row_id=None, revision=None):
-    profile, document, address = validated_party(party, allow_empty_address=row_id is not None)
+    profile = validated_party(party, allow_empty_address=row_id is not None)
+    document = document_digits(profile["id_number"])
     kind = profile["id_type"]
 
     with closing(connect(path)) as db, db:
@@ -134,14 +154,14 @@ def save(path, party, *, create_only=False, row_id=None, revision=None):
             same_identity = existing is not None
             if existing and create_only:
                 raise Conflict("Ese documento ya está guardado. Seleccioná la ficha para actualizarla.")
+        stored = json.loads(existing[1]) if existing else {}
         if same_identity and id_group(kind) == TAX_KIND:
             # Keep historically distinct CUIT/CUIL rows and their known printed labels. A new tax identity stays generic.
-            kind = profile["id_type"] = json.loads(existing[1])["id_type"]
-        if address is None:
-            address = json.loads(existing[1]).get("address", {}) if existing else {}
-        profile["address"] = address
+            kind = profile["id_type"] = stored["id_type"]
+        # A form only sends the fields for its role and payment method. Null explicitly clears a representative.
+        profile = {key: value for key, value in {**stored, **profile}.items() if value is not None}
+        profile.setdefault("address", {})
         if existing and row_id is None:
-            stored = json.loads(existing[1])
             stored.setdefault("address", {})
             stored["id_number"] = formatted_number(stored["id_type"], stored["id_number"])
             if stored == profile:

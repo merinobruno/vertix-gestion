@@ -37,10 +37,9 @@ class Settings:
 
 
 def canonical_party(party, allow_empty_address):
-    profile, digits, address = validated_party(party, allow_empty_address=allow_empty_address)
-    if address is not None:
-        profile["address"] = address
-    return {"profile": profile, "kind": id_group(profile["id_type"]), "digits": digits, "nameKey": search_key(profile["name"])}
+    profile = validated_party(party, allow_empty_address=allow_empty_address)
+    return {"profile": profile, "kind": id_group(profile["id_type"]),
+            "digits": document_digits(profile["id_number"]), "nameKey": search_key(profile["name"])}
 
 
 def prepared(action, body):

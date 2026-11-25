@@ -71,6 +71,27 @@ test("explicit import is repeatable even after a shared ID changes and never ove
   assert.equal((await listing("dni1","1","DNI")).body.total, 0);
 });
 
+test("representatives persist per role across partial edits, imports and explicit removal", async () => {
+  const initial = record(20);
+  const borrower = {name:"Parte B", id_type:"DNI", id_number:"00.000.001",
+    address:{street:"Calle", number:"5", locality:"Ciudad", province:"Provincia"}};
+  const lender = {name:"Parte A", id_type:"DNI", id_number:"00.000.002", title:"la Sra."};
+  const withFields = fields => ({...initial, profile:{...initial.profile, ...fields}});
+  const {party} = (await post("save", {record:withFields({borrower_representative:borrower})})).body;
+  const edit = (row, fields) => post("update", {id:row.id, revision:row.revision, record:withFields(fields)});
+  const updated = (await edit(party, {lender_representative:lender})).body.party;
+  const loaded = (await post("search", {name:"fixture", digits:"", kind:"", offset:0})).body.parties[0];
+  assert.deepEqual(loaded.borrower_representative, borrower);
+  assert.deepEqual(loaded.lender_representative, lender);
+  assert.equal(loaded.revision, updated.revision);
+  const conflict = {...withFields({lender_representative:{...lender, name:"Otra persona"}}), fingerprint:"c".repeat(64)};
+  assert.equal((await post("import", {records:[conflict]})).body.conflicts, 1);
+  const cleared = (await edit(loaded, {borrower_representative:null})).body.party;
+  assert.equal(cleared.borrower_representative, undefined);
+  assert.deepEqual(cleared.lender_representative, lender);
+  assert.equal((await edit(loaded, {lender_representative:null})).status, 409);
+});
+
 test("a page beyond the first internal batch covers all matches in rank and name order", async () => {
   await db.run(async ctx => {
     for (let n = 0; n < 132; n++) await ctx.db.insert("parties", {...record(1000+n,"Grupo " + String(n).padStart(3,"0")),revision:1});
