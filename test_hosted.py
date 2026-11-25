@@ -11,7 +11,7 @@ from test_annex import workbook
 from test_word_models import operation
 
 
-async def request(path, method="GET", *, body=b"", content_type="application/json", origin="https://panel.example", cookie=None):
+async def request(path, method="GET", *, body=b"", content_type="application/json", origin="https://panel.example", headers=()):
     from app import app
 
     scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"}, "http_version": "1.1",
@@ -19,8 +19,7 @@ async def request(path, method="GET", *, body=b"", content_type="application/jso
              "headers": [(b"host", b"panel.example"), (b"content-type", content_type.encode())]}
     if origin is not None:
         scope["headers"].append((b"origin", origin.encode()))
-    if cookie is not None:
-        scope["headers"].append((b"cookie", cookie.encode()))
+    scope["headers"].extend((name.lower().encode(), value.encode()) for name, value in headers)
     events = []
 
     async def receive():

@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import sqlite3
 import threading
 import webbrowser
@@ -12,6 +13,7 @@ from panel_api import ApiError, JSON, Upload, service_info, submit, upload_for
 
 
 STATIC = Path(__file__).with_name("static")
+HOSTED_AGENDA = "https://vertix-gestion.vercel.app/#agenda"
 DIRECTORY_ROUTES = {"/api/agenda/save", "/api/agenda/search", "/api/agenda/list", "/api/agenda/update"}
 DIRECTORY_UPLOAD = Upload(16384, "La ficha supera el tamaño permitido.", ("application/json",), "Se esperaba una ficha en formato JSON.")
 PAGES = {"/": ("index.html", "text/html; charset=utf-8"),
@@ -20,12 +22,27 @@ PAGES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/plantilla-anexo-i.xlsx": ("plantilla-anexo-i.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
 
 
+def team_agenda_url():
+    shortcut = party_directory.default_database().parent / "Acceso Agenda" / "Agenda compartida.url"
+    try:
+        with shortcut.open("rb") as source:
+            raw = source.read(2048)
+        encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+        for line in raw.decode(encoding).splitlines():
+            name, _, value = line.partition("=")
+            if name.upper() == "URL" and re.fullmatch(re.escape(HOSTED_AGENDA) + r"/[a-f0-9]{64}", value):
+                return value
+    except (OSError, UnicodeError):
+        pass
+    return HOSTED_AGENDA
+
+
 class Panel(BaseHTTPRequestHandler):
     def local_request(self):
         hosts = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
         return self.headers.get("Host") in hosts
 
-    def respond(self, status, data, content_type, name=None):
+    def respond(self, status, data, content_type, name=None, *, location=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
@@ -35,6 +52,8 @@ class Panel(BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'")
         if name:
             self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+        if location:
+            self.send_header("Location", location)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(data)
@@ -49,6 +68,12 @@ class Panel(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == "/api/health":
             self.respond(200, json.dumps(service_info(pdf_export=True, party_directory=True)).encode(), "application/json")
+        elif path == "/agenda-compartida":
+            if (self.headers.get("Origin") not in (None, "http://" + self.headers["Host"])
+                    or self.headers.get("Sec-Fetch-Site") not in (None, "none", "same-origin")):
+                self.error_json(403, "Abrí la agenda desde el panel local.")
+                return
+            self.respond(302, b"", "text/plain", location=team_agenda_url())
         elif path in PAGES:
             name, mime = PAGES[path]
             self.respond(200, (STATIC/name).read_bytes(), mime)

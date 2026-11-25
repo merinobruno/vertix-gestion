@@ -1,8 +1,13 @@
 import {legacyPartyCount, legacyPartyPage} from "./legacy-directory.js";
 
-async function post(action, payload, signal) {
-  const response = await fetch("/api/agenda/" + action, {method:"POST", credentials:"same-origin", cache:"no-store",
-    headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload), signal});
+const storageKey = "vertix.agenda.team-link";
+const linkPattern = /^[a-f0-9]{64}$/;
+const missingLink = "Abrí el enlace de la Agenda que compartió tu equipo.";
+const invalidLink = "Este enlace de la Agenda no es válido. Pedí el enlace actual al equipo.";
+
+async function post(action, payload, link, signal) {
+  const response = await fetch("/api/agenda/" + action, {method:"POST", credentials:"omit", cache:"no-store", redirect:"error",
+    headers:{"Content-Type":"application/json", "X-Vertix-Agenda-Link":link}, body:JSON.stringify(payload), signal});
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(data.error || "No se pudo conectar con la agenda compartida. Volvé a intentar.");
@@ -14,121 +19,117 @@ async function post(action, payload, signal) {
 
 export function setupSharedDirectory(onAccess, onImport) {
   const byId = id => document.getElementById(id);
-  const form = byId("agenda-access"), code = byId("agenda-code"), login = byId("agenda-login"), logout = byId("agenda-logout");
-  const message = byId("agenda-access-status"), importer = byId("agenda-import"), outcome = byId("agenda-import-status");
-  let enabled = false, authenticated = false, busy = false, retryLogout = false, generation = 0, timer = 0, channel;
-  let session = new AbortController();
+  const message = byId("agenda-access-status"), retry = byId("agenda-retry"), copy = byId("agenda-copy-link");
+  const importer = byId("agenda-import"), outcome = byId("agenda-import-status");
+  let enabled = false, current = null, remembered = "";
 
-  function render() {
-    form.hidden = !enabled || authenticated;
-    logout.hidden = !enabled || (!authenticated && !retryLogout);
-    logout.disabled = login.disabled = busy;
-    message.hidden = !message.textContent;
+  function showStatus(text, canRetry = false) {
+    message.textContent = text;
+    message.hidden = !text;
+    retry.hidden = !canRetry;
   }
 
-  function setAccess(allowed, expires = 0) {
-    clearTimeout(timer);
-    const changed = authenticated !== allowed;
-    authenticated = allowed;
-    if (changed) {
-      session.abort();
-      session = new AbortController();
-      importer.hidden = outcome.hidden = true;
-      importer.disabled = false;
-      outcome.textContent = "";
-      code.value = "";
+  function reset() {
+    const wasAvailable = current?.ready;
+    current?.controller.abort();
+    current = null;
+    copy.hidden = importer.hidden = outcome.hidden = true;
+    importer.disabled = false;
+    outcome.textContent = "";
+    if (wasAvailable) onAccess();
+  }
+
+  function savedLink() {
+    try { return localStorage.getItem(storageKey) || remembered; }
+    catch { return remembered; }
+  }
+
+  function forget(link) {
+    if (remembered === link) remembered = "";
+    try { if (localStorage.getItem(storageKey) === link) localStorage.removeItem(storageKey); }
+    catch { /* The URL also works when browser storage is disabled. */ }
+  }
+
+  async function check() {
+    if (!enabled) return;
+    const route = /^#(?:agenda|operacion)\/(.*)$/.exec(location.hash);
+    const link = route ? route[1] : savedLink();
+    if (current?.link === link) return;
+    reset();
+    if (!linkPattern.test(link)) {
+      showStatus(route ? invalidLink : missingLink);
+      return;
     }
-    render();
-    if (changed) onAccess();
-    if (!allowed) return;
-    const active = session;
-    timer = setTimeout(() => lock("La sesión venció. Volvé a ingresar."), Math.max(0, expires * 1000 - Date.now()));
-    if (changed) legacyPartyCount().then(count => {
-      if (session !== active || !count) return;
+    const access = {link, controller:new AbortController(), ready:false};
+    current = access;
+    showStatus("Abriendo la Agenda…");
+    try {
+      const result = await post("access", {}, link, access.controller.signal);
+      if (current !== access) return;
+      if (result.available !== true) throw new Error();
+    } catch (error) {
+      if (current !== access) return;
+      if (error.status === 401) forget(link);
+      showStatus(error.status === 401 ? invalidLink : "No se pudo conectar con la agenda compartida.", error.status !== 401);
+      return;
+    }
+    access.ready = true;
+    remembered = link;
+    try { localStorage.setItem(storageKey, link); } catch { /* Navigation also keeps the link in the fragment. */ }
+    if (location.hash === "#agenda") history.replaceState(history.state, "", "#agenda/" + link);
+    copy.hidden = false;
+    showStatus("");
+    onAccess();
+    legacyPartyCount().then(count => {
+      if (current !== access || !count) return;
       importer.textContent = "Importar " + count + (count === 1 ? " ficha de este navegador" : " fichas de este navegador");
       importer.hidden = false;
     }).catch(() => {}); // Old browser storage is optional.
   }
 
-  function lock(text = "") {
-    generation++;
-    code.value = "";
-    message.textContent = text;
-    setAccess(false);
-  }
-
-  async function check() {
-    if (!enabled || busy || retryLogout) return;
-    const token = ++generation;
-    try {
-      const current = await post("session", {});
-      if (token !== generation || !enabled) return;
-      message.textContent = !current.configured ? "La agenda compartida no está disponible. Volvé a intentar." :
-        (authenticated && !current.authenticated ? "La sesión venció. Volvé a ingresar." : message.textContent);
-      setAccess(current.authenticated === true, current.expires_at);
-    } catch {
-      if (token === generation && enabled) lock("No se pudo verificar la sesión. Volvé a ingresar.");
-    }
-  }
-
   async function request(action, payload, signal) {
-    if (!enabled || !authenticated) throw new Error("Ingresá la clave del equipo para acceder a la agenda.");
-    const active = session;
+    const access = current;
+    if (!access?.ready) throw new Error(missingLink);
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal?.throwIfAborted();
     signal?.addEventListener("abort", abort, {once:true});
-    active.signal.addEventListener("abort", abort, {once:true});
+    access.controller.signal.addEventListener("abort", abort, {once:true});
     try {
-      const data = await post(action, payload, controller.signal);
+      const data = await post(action, payload, access.link, controller.signal);
       controller.signal.throwIfAborted();
       return data;
     } catch (error) {
-      if (session === active && error.status === 401) lock("La sesión venció. Volvé a ingresar.");
+      if (current === access && error.status === 401) {
+        forget(access.link);
+        reset();
+        showStatus(invalidLink);
+      }
       throw error;
     } finally {
       signal?.removeEventListener("abort", abort);
-      active.signal.removeEventListener("abort", abort);
+      access.controller.signal.removeEventListener("abort", abort);
     }
   }
 
-  form.addEventListener("submit", async event => {
-    event.preventDefault();
-    if (!enabled || busy || !code.value.trim()) return;
-    const token = ++generation;
-    busy = true;
-    message.textContent = "";
-    render();
+  copy.addEventListener("click", async () => {
+    const access = current;
+    if (!access?.ready) return;
+    const url = new URL("/", location.origin);
+    url.hash = "agenda/" + access.link;
     try {
-      const result = await post("login", {code:code.value.trim()});
-      if (token !== generation || !enabled) return;
-      retryLogout = false;
-      code.value = "";
-      setAccess(true, result.expires_at);
-      channel?.postMessage("login");
-    } catch (error) {
-      if (token === generation) { message.textContent = error.message === "Failed to fetch" ? "No se pudo iniciar sesión." : error.message; code.select(); }
-    } finally { busy = false; render(); }
-  });
-
-  logout.addEventListener("click", async () => {
-    if (!enabled || busy) return;
-    busy = true;
-    retryLogout = true;
-    lock();
-    try {
-      await post("logout", {});
-      retryLogout = false;
-      channel?.postMessage("logout");
-      code.focus();
+      await navigator.clipboard.writeText(url.href);
+      if (access === current) showStatus("Enlace copiado.");
     } catch {
-      message.textContent = "No se pudo cerrar la sesión. Volvé a elegir «Cerrar sesión».";
-    } finally { busy = false; render(); }
+      if (access !== current) return;
+      history.replaceState(history.state, "", url);
+      showStatus("Copiá el enlace de la barra de direcciones.");
+    }
   });
 
   importer.addEventListener("click", async () => {
-    if (!authenticated || importer.disabled) return;
-    const active = session;
+    const access = current;
+    if (!access?.ready || importer.disabled) return;
     importer.disabled = true;
     outcome.hidden = false;
     outcome.textContent = "Importando fichas…";
@@ -137,7 +138,7 @@ export function setupSharedDirectory(onAccess, onImport) {
       let cursor = null;
       while (true) {
         const batch = await legacyPartyPage(cursor);
-        if (session !== active) return;
+        if (current !== access) return;
         if (!batch.parties.length) break;
         const result = await request("import", {parties:batch.parties});
         for (const key of Object.keys(counts)) counts[key] += result[key];
@@ -149,24 +150,25 @@ export function setupSharedDirectory(onAccess, onImport) {
       importer.hidden = true;
       onImport();
     } catch {
-      if (session === active) outcome.textContent = "La importación se interrumpió. Podés retomarla sin duplicar fichas.";
-    } finally { if (session === active) importer.disabled = false; }
+      if (current === access) outcome.textContent = "La importación se interrumpió. Podés retomarla sin duplicar fichas.";
+    } finally { if (current === access) importer.disabled = false; }
   });
 
-  window.addEventListener("focus", check);
-  window.addEventListener("pageshow", event => { if (event.persisted) check(); });
-  return {request, get authenticated() { return authenticated; }, enable(active) {
-    if (enabled === active) return;
-    enabled = active;
-    channel?.close();
-    channel = null;
-    retryLogout = false;
-    lock();
-    if (!active) return;
-    try {
-      channel = new BroadcastChannel("vertix-agenda-session");
-      channel.onmessage = event => { if (event.data === "logout") lock(); else if (event.data === "login") check(); };
-    } catch { /* Session checks on focus also work without BroadcastChannel. */ }
-    check();
-  }};
+  function retryCheck() { reset(); check(); }
+  retry.addEventListener("click", retryCheck);
+  window.addEventListener("online", () => { if (!retry.hidden) retryCheck(); });
+  window.addEventListener("hashchange", check);
+  window.addEventListener("storage", event => { if (event.key === storageKey) check(); });
+  return {request, get available() { return Boolean(current?.ready); },
+    fragment(agenda) {
+      if (current) return (agenda ? "#agenda/" : "#operacion/") + current.link;
+      return agenda ? "#agenda" : "";
+    },
+    enable(active) {
+      if (enabled === active) return;
+      enabled = active;
+      if (active) check();
+      else { reset(); showStatus(""); }
+    }
+  };
 }

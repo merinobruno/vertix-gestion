@@ -1,4 +1,6 @@
 import json
+import os
+import secrets
 import sqlite3
 import tempfile
 import threading
@@ -8,9 +10,10 @@ from contextlib import closing, contextmanager
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 from party_directory import list_parties, save, search, update
-from server import Panel
+from server import HOSTED_AGENDA, Panel
 from test_word_models import example_address
 
 
@@ -54,6 +57,27 @@ class PartyDirectory(unittest.TestCase):
         self.path = Path(folder.name) / "agenda.sqlite3"
         self.party = {"name":"Álamo de Prueba", "id_type":"DNI", "id_number":"00.000.111",
                       "address":dict(example_address("Calle de Prueba", "8"), floor="2", apartment="B")}
+
+    def test_local_team_link_uses_only_the_provisioned_destination(self):
+        self.enterContext(patch.dict(os.environ, {"LOCALAPPDATA": str(self.path.parent)}))
+        shortcut = self.path.parent / "Vertix" / "Acceso Agenda" / "Agenda compartida.url"
+        shortcut.parent.mkdir(parents=True)
+        team_url = HOSTED_AGENDA + "/" + secrets.token_hex(32)
+        with local_panel(self.path) as port:
+            def navigate(headers=None):
+                with closing(HTTPConnection("127.0.0.1", port, timeout=3)) as connection:
+                    connection.request("GET", "/agenda-compartida", headers=headers or {})
+                    response = connection.getresponse()
+                    self.assertIn("no-store", response.getheader("Cache-Control"))
+                    return response.status, response.getheader("Location")
+
+            self.assertEqual(navigate(), (302, HOSTED_AGENDA))
+            shortcut.write_text("[InternetShortcut]\nURL=https://otro.example/\n", encoding="utf-8")
+            self.assertEqual(navigate(), (302, HOSTED_AGENDA))
+            shortcut.write_text("[InternetShortcut]\nURL=" + team_url + "\n", encoding="utf-8-sig")
+            self.assertEqual(navigate({"Sec-Fetch-Site":"same-origin"}), (302, team_url))
+            for headers in ({"Origin":"https://otro.example"}, {"Sec-Fetch-Site":"cross-site"}, {"Host":"otro.example"}):
+                self.assertEqual(navigate(headers), (403, None))
 
     def test_shared_across_roles_and_server_restarts(self):
         with local_panel(self.path) as port:

@@ -73,7 +73,6 @@
               </div></div>
             </div>
             <div class="tab-body" id="partes" role="tabpanel" aria-labelledby="tab-partes" hidden inert>
-              <a id="party-agenda-access" href="#agenda" hidden>Acceder a la agenda del equipo</a>
               <div class="group" data-condition="loan"><h2>Cliente</h2><div class="field-grid party" role="group" aria-label="Cliente" data-party="client"></div>
                 <div data-condition="bankLoan" class="field-grid" data-treatment="borrower_title"></div>
                 <label class="toggle" data-condition="chequeLoan"><md-switch name="represented" aria-label="Firma un representante"></md-switch>Firma un representante</label>
@@ -153,17 +152,11 @@
     </div>
     <section id="agenda-view" role="tabpanel" aria-labelledby="tab-agenda" hidden>
       <div class="intro"><div><h1 id="agenda-title">Agenda</h1><p id="agenda-storage" hidden>Las fichas se comparten con el equipo.</p>
-        <a id="agenda-shared-link" href="https://vertix-gestion.vercel.app/#agenda" target="_blank" rel="noopener noreferrer" hidden>Abrir agenda compartida</a></div>
-        <md-outlined-button id="agenda-logout" type="button" hidden>Cerrar sesión</md-outlined-button></div>
-      <form id="agenda-access" class="card agenda-card" hidden>
-        <h2>Acceder a la agenda</h2>
-        <label class="agenda-search">Clave del equipo
-          <input type="password" id="agenda-code" name="team-code" maxlength="128" autocomplete="current-password" required>
-        </label>
-        <p id="agenda-access-status" role="status" hidden></p>
-        <div class="agenda-actions"><md-filled-button id="agenda-login" type="submit">Acceder</md-filled-button></div>
-      </form>
-      <div id="agenda-browse" class="card agenda-card">
+        <a id="agenda-shared-link" href="/agenda-compartida" target="_blank" rel="noopener noreferrer" hidden>Abrir agenda compartida</a></div>
+        <md-outlined-button id="agenda-copy-link" type="button" hidden>Copiar enlace del equipo</md-outlined-button></div>
+      <p id="agenda-access-status" role="status" hidden></p>
+      <md-text-button id="agenda-retry" type="button" hidden>Volver a intentar</md-text-button>
+      <div id="agenda-browse" class="card agenda-card" hidden>
         <label class="agenda-search">Buscar
           <input id="agenda-search" type="search" placeholder="Nombre, razón social, CUIT, CUIL o DNI" maxlength="240" autocomplete="off">
         </label>

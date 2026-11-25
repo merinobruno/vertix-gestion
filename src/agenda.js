@@ -1,6 +1,6 @@
 import {bindIdentification, displayNumber, readIdentification, taxKind, writeIdentification} from "./identification.js";
 
-export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest}) {
+export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest, viewFragment}) {
   const byId = id => document.getElementById(id);
   const tabs = byId("workspace-tabs");
   const opTab = byId("tab-operation");
@@ -122,12 +122,19 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     }, delay);
   }
 
+  function agendaInUrl() {
+    return location.hash === "#agenda" || location.hash.startsWith("#agenda/");
+  }
+
   function useView(showAgenda, changeUrl = false) {
     if (!available && showAgenda) return;
-    if (changeUrl && location.hash !== (showAgenda ? "#agenda" : "")) {
-      const url = new URL(location.href);
-      url.hash = showAgenda ? "agenda" : "";
-      history.pushState(null, "", url);
+    if (changeUrl) {
+      const fragment = viewFragment(showAgenda);
+      if (location.hash !== fragment) {
+        const url = new URL(location.href);
+        url.hash = fragment;
+        history.pushState(null, "", url);
+      }
     }
     const wasActive = active;
     active = showAgenda;
@@ -161,7 +168,7 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
     (showAgenda ? agendaTab : opTab).focus();
     useView(showAgenda, true);
   });
-  window.addEventListener("hashchange", () => useView(location.hash === "#agenda"));
+  window.addEventListener("hashchange", () => useView(agendaInUrl()));
   search.addEventListener("input", () => { feedback.hidden = true; focusRow = null; load(0, 120); });
   byId("agenda-prev").addEventListener("click", () => load(Math.max(0, pageOffset - pageSize)));
   byId("agenda-next").addEventListener("click", () => load(pageOffset + pageLength));
@@ -222,7 +229,7 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
       operation.removeAttribute("role");
       operation.removeAttribute("aria-labelledby");
     }
-    useView(enabled && location.hash === "#agenda");
+    useView(enabled && agendaInUrl());
     if (wasActive && active && readable && !editing) load(pageOffset);
   }
   return {setAvailable, reload:() => load(0)};

@@ -4,8 +4,6 @@ import http.client
 import json
 import os
 import re
-import secrets
-import time
 from dataclasses import dataclass
 
 from fastapi import APIRouter, Request
@@ -19,11 +17,10 @@ from party_directory import search_key, validated_party
 
 
 router = APIRouter(prefix="/api/agenda")
-COOKIE = "__Host-vertix-agenda"
-LIFETIME = 12 * 60 * 60
-PRIVATE = {"Cache-Control": "private, no-store", "Vary": "Cookie"}
+LINK_HEADER = "X-Vertix-Agenda-Link"
+PRIVATE = {"Cache-Control": "private, no-store", "Vary": LINK_HEADER}
 UNAVAILABLE = "No se pudo conectar con la agenda compartida. Volvé a intentar."
-LOCKED = "Ingresá la clave del equipo para acceder a la agenda."
+LINK_REQUIRED = "Abrí el enlace de la Agenda que compartió tu equipo."
 DATA_ACTIONS = {"search", "list", "save", "update", "import"}
 
 
@@ -31,28 +28,17 @@ DATA_ACTIONS = {"search", "list", "save", "update", "import"}
 class Settings:
     host: str
     service_key: str
-    code_hash: str
+    link_hash: str
 
     @classmethod
     def configured(cls):
         url = os.environ.get("VERTIX_AGENDA_URL", "").strip()
         host = re.fullmatch(r"https://([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.convex\.site)/?", url)
         key = os.environ.get("VERTIX_AGENDA_SERVICE_KEY", "").strip()
-        digest = os.environ.get("VERTIX_AGENDA_KEY_HASH", "").strip()
+        digest = os.environ.get("VERTIX_AGENDA_LINK_HASH", "").strip()
         if not host or not re.fullmatch(r"[!-~]{32,512}", key) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             return None
         return cls(host[1], key, digest)
-
-    def sign(self, payload):
-        signing_key = hmac.digest(self.service_key.encode("ascii"), b"vertix:agenda:session:v1\0" + self.code_hash.encode("ascii"), "sha256")
-        return hmac.new(signing_key, payload.encode("ascii"), hashlib.sha256).hexdigest()
-
-    def expiry(self, cookie):
-        match = re.fullmatch(r"(v1\.([0-9]{10,11})\.[A-Za-z0-9_-]{22})\.([a-f0-9]{64})", cookie or "")
-        if not match or not hmac.compare_digest(self.sign(match[1]), match[3]):
-            return 0
-        now, expiry = int(time.time()), int(match[2])
-        return expiry if now < expiry <= now + LIFETIME else 0
 
 
 def canonical_party(party, allow_empty_address):
@@ -150,32 +136,19 @@ async def agenda(action: str, request: Request):
     origin = request.headers.get("origin")
     if not host or (origin != "https://" + host and not (local and origin == "http://" + host)):
         raise ApiError(403, "Abrí la agenda desde el panel.")
-    if action not in DATA_ACTIONS and action not in ("session", "login", "logout"):
+    if action not in DATA_ACTIONS and action != "access":
         raise ApiError(404, "La dirección solicitada no existe.")
+    link = request.headers.get(LINK_HEADER, "")
+    if not re.fullmatch(r"[0-9a-f]{64}", link):
+        raise ApiError(401, LINK_REQUIRED)
     settings = Settings.configured()
-    expiry = settings.expiry(request.cookies.get(COOKIE)) if settings else 0
-    if action in DATA_ACTIONS and not expiry:
-        raise ApiError(401, LOCKED)
+    if not settings:
+        raise ApiError(503, UNAVAILABLE)
+    if not hmac.compare_digest(hashlib.sha256(link.encode("ascii")).hexdigest(), settings.link_hash):
+        raise ApiError(401, LINK_REQUIRED)
     body = await body_for(request, 98304 if action == "import" else 16384 if action in DATA_ACTIONS else 1024)
-    if action == "session":
-        return JSONResponse({"configured": bool(settings), "authenticated": bool(expiry), "expires_at": expiry}, headers=PRIVATE)
-    if action == "logout":
-        response = JSONResponse({"authenticated": False}, headers=PRIVATE)
-        response.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
-        return response
-    if action == "login":
-        if not settings:
-            raise ApiError(503, UNAVAILABLE)
-        code = body.get("code")
-        if not isinstance(code, str) or not 1 <= len(code.strip()) <= 128 or not code.strip().isascii():
-            raise ApiError(401, "La clave del equipo es incorrecta.")
-        if not hmac.compare_digest(hashlib.sha256(code.strip().encode("ascii")).hexdigest(), settings.code_hash):
-            raise ApiError(401, "La clave del equipo es incorrecta.")
-        expiry = int(time.time()) + LIFETIME
-        payload = f"v1.{expiry}.{secrets.token_urlsafe(16)}"
-        response = JSONResponse({"authenticated": True, "expires_at": expiry}, headers=PRIVATE)
-        response.set_cookie(COOKIE, payload + "." + settings.sign(payload), max_age=LIFETIME, path="/", secure=True, httponly=True, samesite="strict")
-        return response
+    if action == "access":
+        return JSONResponse({"available": True}, headers=PRIVATE)
     try:
         data = prepared(action, body)
     except ValueError as exc:

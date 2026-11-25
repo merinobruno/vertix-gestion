@@ -52,9 +52,8 @@ function updateDirectoryAccess() {
   const sharedMode = directoryMode === "shared";
   byId("agenda-title").textContent = directoryMode === "local" ? "Agenda local" : "Agenda";
   byId("agenda-shared-link").hidden = directoryMode !== "local";
-  directoryBackend = directoryMode === "local" ? localDirectoryRequest : sharedMode && shared.authenticated ? shared.request : null;
-  byId("agenda-storage").hidden = !sharedMode;
-  byId("party-agenda-access").hidden = !sharedMode || shared.authenticated;
+  directoryBackend = directoryMode === "local" ? localDirectoryRequest : sharedMode && shared.available ? shared.request : null;
+  byId("agenda-storage").hidden = !sharedMode || !shared.available;
   agenda.setAvailable(Boolean(directoryMode), Boolean(directoryBackend));
   refresh();
 }
@@ -912,7 +911,8 @@ form.addEventListener("submit",async event => {
   }
 });
 
-const agenda = setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest});
+const agenda = setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest,
+  viewFragment:showAgenda => shared.fragment(showAgenda)});
 const shared = setupSharedDirectory(updateDirectoryAccess, agenda.reload);
 enableNumericDate(control("issue_date"));
 writeField(control("issue_date"), localDate());
