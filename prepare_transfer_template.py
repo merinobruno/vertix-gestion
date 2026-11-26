@@ -21,7 +21,7 @@ def bind(body):
          capture(text, r"y (?P<borrower_intro>el Sr\. )(?P<borrower_name>.+?), (?P<borrower_id_kind>D\.N\.I\.) N°(?P<borrower_id>[\d.]+), con domicilio real en (?P<borrower_address>.+?), en adelante"))
     text = string(body[2])
     mark(body[2], capture(text, r"\$(?P<amount_digits>[\d.,]+) en efectivo, \(Pesos (?P<amount_words>.+?) con (?P<cents>\d+)/100") +
-         capture(text, r"a nombre de (?P<account_holder>.+?), (?P<account_id_kind>CUIT) (?P<account_id>[\d-]+), Banco (?P<bank_name>.+?), (?P<account_type>Cta\. Cte\.) (?P<account_number>[\d-]+), CBU (?P<cbu>\d+)"))
+         capture(text, r"a nombre de (?P<account_holder>.+?), (?P<account_id_kind>CUIT) (?P<account_id>[\d-]+), (?P<bank_prefix>Banco )(?P<bank_name>.+?), (?P<account_type>Cta\. Cte\.) (?P<account_number>[\d-]+), CBU (?P<cbu>\d+)"))
     mark(body[3], capture(string(body[3]), r"punitorio del (?P<penalty>\d+)%"))
     mark(body[6], capture(string(body[6]), r"Mutuante (?P<count>\d+) \((?P<count_words>\w+)\) pagarés"))
     mark(body[7], capture(string(body[7]), r"6\) (?P<guarantor_title>La Sra\.) (?P<guarantor_name>.+?), (?P<guarantor_id_kind>D\. N\. I\.) N°(?P<guarantor_id>[\d.]+), con domicilio real en (?P<guarantor_address>.+?) se constituye"))
@@ -37,7 +37,7 @@ def bind(body):
         mark(body[start+3], date_fields(text, "due") +
              capture(text, r"ilimitada a (?P<beneficiary_name>.+?), (?P<beneficiary_id_kind>CUIT) (?P<beneficiary_id>[\d-]+), o a su orden") +
              capture(text, r"cantidad de pesos (?P<amount_words>.+?) con (?P<cents>\d\d)/100, \(\$(?P<amount_digits>[\d.,]+)\.\-\)") +
-             capture(text, r"pagadero en calle (?P<payment_address>.+)\.$"))
+             capture(text, r"pagadero en (?P<street_prefix>calle )(?P<payment_address>.+)\.$"))
         mark(body[start+5], capture(string(body[start+5]), r"emitido por (?P<beneficiary_waiver>.+)\.$"))
         text = string(body[start+7])
         mark(body[start+7], capture(text, r"constituye el número (?P<number_words>\w+) \((?P<body_number>\d+)\) de (?P<count_words>\w+) \((?P<count>\d+)\)") +

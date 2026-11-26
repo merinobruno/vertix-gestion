@@ -66,7 +66,7 @@ def loan_master(body):
         text = string(p)
         payee = re.search(r"ilimitada a (.+?), (CUIT) ([\d-]+), o a su orden", text)
         amount = re.search(r"cantidad de pesos (.+?) con (\d\d)/100, \(\$([\d.,]+)\.\-\)", text)
-        address = re.search(r"pagadero en calle (.+)\.$", text)
+        address = re.search(r"pagadero en (calle )(.+)\.$", text)
         mark(p, [*date_fields(text, "due"),
                  (payee.start(1), payee.end(1), "beneficiary_name"),
                  (payee.start(2), payee.end(2), "beneficiary_id_kind"),
@@ -74,7 +74,8 @@ def loan_master(body):
                  (amount.start(1), amount.end(1), "amount_words"),
                  (amount.start(2), amount.end(2), "cents"),
                  (amount.start(3), amount.end(3), "amount_digits"),
-                 (address.start(1), address.end(1), "payment_address")])
+                 (address.start(1), address.end(1), "street_prefix"),
+                 (address.start(2), address.end(2), "payment_address")])
         # The final period belongs to the source's abbreviated company name;
         # when the submitted name lacks punctuation, its sentence still ends here.
         mark(body[waiver], [(415, 423, "beneficiary_waiver")])

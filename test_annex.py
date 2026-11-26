@@ -40,6 +40,41 @@ def bank_operation():
 
 
 class Annex(unittest.TestCase):
+    def test_bank_prefix_is_printed_once_without_affecting_the_account_holder(self):
+        data = dict(bank_operation(), documents=["mutuo"], account_holder="Tercera Ficticia S.A.", account_id="30-00000002-3")
+        for name, expected in (("de Prueba", "Banco de Prueba"), ("Banco de Prueba", "Banco de Prueba"),
+                               ("  bAnCo   de Prueba ", "Banco de Prueba"), ("Bancor", "Banco Bancor"), ("Banco", "Banco")):
+            with self.subTest(name=name):
+                doc = body(dict(word_documents(parse(dict(data, bank_name=name))))["mutuo"])
+                self.assertIn(f"a nombre de Tercera Ficticia S.A., CUIT 30-00000002-3, {expected}, Cta. Cte.", paragraph_text(doc[2]))
+
+    def test_bank_loan_borrower_titles_are_optional_and_never_applied_to_company_names(self):
+        data = dict(bank_operation(), documents=["mutuo"], lender_rep_name="Marina de Prueba", lender_rep_title="la Sra.")
+        for name, treatment, expected in (
+                ("Comercial de Ejemplo S.A.", "el Sr.", "Comercial de Ejemplo S.A."),
+                ("Comercial de Ejemplo SRL", "la Sra.", "Comercial de Ejemplo SRL"),
+                ("Comercial de Ejemplo S.A.S.", "el Sr.", "Comercial de Ejemplo S.A.S."),
+                ("Entidad de Ejemplo", None, "Entidad de Ejemplo"), ("Entidad de Ejemplo", "", "Entidad de Ejemplo"),
+                ("Marina de Prueba", "la Sra.", "la Sra. Marina de Prueba"),
+                ("Martín de Prueba", "el Sr.", "el Sr. Martín de Prueba")):
+            with self.subTest(name=name, treatment=treatment):
+                data["client"]["name"] = name
+                doc = body(dict(word_documents(parse(dict(data, borrower_title=treatment))))["mutuo"])
+                intro = paragraph_text(doc[1])
+                self.assertIn("representada en este acto por la Sra. Marina de Prueba, DNI", intro)
+                self.assertIn(f'“el Mutuante”, y {expected}, CUIT N°00-00000000-0', intro)
+
+    def test_note_templates_only_supply_a_street_type_when_one_is_missing(self):
+        for make in (operation, bank_operation):
+            data = dict(make(), documents=["pagares"], separate_payment=True)
+            for street, expected in (("Avenida de Prueba", "Avenida de Prueba"), ("Calle de Prueba", "Calle de Prueba"),
+                                     ("Av. San Martín", "Av. San Martín"), ("Ruta 22", "Ruta 22"),
+                                     ("San Martín", "calle San Martín"), ("Avellaneda", "calle Avellaneda")):
+                with self.subTest(method=make.__name__, street=street):
+                    data["payment_address"] = example_address(street, "40")
+                    for _, note in word_documents(parse(data)):
+                        self.assertIn(f"pagadero en {expected} 40, Ciudad de Prueba, Neuquén.", paragraph_text(body(note)))
+
     def test_transfer_loan_names_the_lender_and_its_own_cuit_separately_from_the_account_holder(self):
         data = dict(bank_operation(), documents=["mutuo"], account_holder="Tercero Ejemplo", account_id="30-00000002-0")
         contract = body(dict(word_documents(parse(data)))["mutuo"])

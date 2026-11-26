@@ -28,7 +28,7 @@ FIELDS = (
     "demand_payee demand_consideration demand_words demand_day "
     "lender_id_kind lender_id lender_rep_title lender_rep_name lender_rep_id "
     "account_holder account_id_kind account_id bank_name account_type account_number cbu "
-    "guarantor_title guarantor_name guarantor_id_kind guarantor_id guarantor_address"
+    "guarantor_title guarantor_name guarantor_id_kind guarantor_id guarantor_address bank_prefix street_prefix"
 ).split()
 MARKERS = {name: chr(0xE100 + i) for i, name in enumerate(FIELDS)}
 NAMES = {marker: key for key, marker in MARKERS.items()}

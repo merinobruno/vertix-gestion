@@ -53,6 +53,17 @@ def operation():
 
 
 class WordModels(unittest.TestCase):
+    def test_cheque_loan_names_each_signer_without_assigning_a_title(self):
+        for represented in (False, True):
+            with self.subTest(represented=represented):
+                data = dict(operation(), documents=["mutuo"], represented=represented)
+                signer = dict(data["client"], name="Mara de Prueba", id_type="DNI", id_number="00000007")
+                data["client"]["name"] = "Comercial de Ejemplo S.A."
+                data["representative" if represented else "client"] = signer
+                intro = paragraph_text(body(dict(word_documents(parse(data)))["mutuo"])[1])
+                self.assertIn("y por la otra Mara de Prueba, D.N.I. N°00.000.007", intro)
+                self.assertEqual(", en representación de Comercial de Ejemplo S.A.," in intro, represented)
+
     def test_cheque_loan_alone_prints_and_requires_the_lenders_own_id(self):
         data = dict(operation(), documents=["mutuo"], net="1.234,56", penalty="2,50")
         data["entity"].update(id_number="30712345678")

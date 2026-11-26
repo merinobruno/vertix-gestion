@@ -194,9 +194,12 @@ for (const input of document.querySelectorAll("[data-id-kind]")) {
 for (const group of document.querySelectorAll("[data-treatment]")) {
   const name = group.dataset.treatment;
   const select = element("md-outlined-select",{name});
-  for (const [text,value] of [["Sr.","el Sr."],["Sra.","la Sra."]]) {
+  const options = [["Sr.","el Sr."],["Sra.","la Sra."]];
+  if (name === "borrower_title") options.unshift(["Sin tratamiento", ""]);
+  const initial = name === "guarantor_title" ? "la Sra." : options[0][1];
+  for (const [text,value] of options) {
     const option = element("md-select-option",{value});
-    if ((name === "guarantor_title") === (text === "Sra.")) option.setAttribute("selected","");
+    if (value === initial) option.setAttribute("selected","");
     option.append(element("span",{slot:"headline",textContent:text}));
     select.append(option);
   }

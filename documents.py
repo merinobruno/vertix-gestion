@@ -19,6 +19,12 @@ HUNDREDS = "cero ciento doscientos trescientos cuatrocientos quinientos seiscien
 TYPES = ("mutuo", "pagares", "cesion")
 MIME = {"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "pdf": "application/pdf", "zip": "application/zip"}
+COMPANY_SUFFIX = re.compile(
+    r"\b(?:s\.?\s*(?:a(?:\.?\s*[su])?|r\.?\s*l|c\.?\s*a)|"
+    r"sociedad (?:an[oó]nima(?: unipersonal)?|por acciones simplificada|de responsabilidad limitada))\.?$", re.I)
+STREET_TYPE = re.compile(
+    r"^(?:calle|callej[oó]n|avenida|av(?:da)?|ruta|pasaje|pje|camino|diagonal|diag|"
+    r"bulevar|boulevard|bv|blvd|paseo|peatonal|autopista|autov[ií]a|colectora)(?:\.|\s|$)", re.I)
 
 
 def counted(text):
@@ -156,7 +162,7 @@ def rows(raw, *, cheques, need_bank, notes=False, loan=False, detail=False):
 
 def title(value, default):
     value = default if value is None else value
-    if value not in ("el Sr.", "la Sra."):
+    if value not in ("el Sr.", "la Sra.", default):
         raise ValueError("Revisá el tratamiento de la parte.")
     return value
 
@@ -223,7 +229,7 @@ def parse(raw):
         op["penalty"] = money_value(raw.get("penalty"), "la tasa punitoria mensual", allow_zero=True)
         if bank:
             op["bank_fields"] = bank_fields(raw, entity)
-            op["borrower_title"] = title(raw.get("borrower_title"), "el Sr.")
+            op["borrower_title"] = title(raw.get("borrower_title"), "")
         if op["guarantee"]:
             op["guarantor"] = party(raw.get("guarantor"), "la parte garante", address_required=True)
             op["guarantor_title"] = title(raw.get("guarantor_title"), "la Sra.")
@@ -301,15 +307,21 @@ def word_pieces(op):
         loan = {**values, **amount_fields(op["net"]),
                 "lender_name": company_name(op["entity"], "SA"), "lender_address": op["entity"]["address"],
                 "lender_id_kind": op["entity"]["id_type"], "lender_id": op["entity"]["id_number"],
-                "borrower_intro": "el Sr. " if representative or signer["id_type"] == "DNI" else "",
+                "borrower_intro": "",
                 "borrower_name": signer["name"], "borrower_id_kind": "D.N.I." if signer["id_type"] == "DNI" else signer["id_type"],
                 "borrower_id": signer["id_number"], "borrower_address": signer["address"],
                 "representation": ", en representación de " if representative else "",
                 "represented_name": client["name"] if representative else "",
                 "penalty": penalty.replace(".", ",")}
         if op["bank"]:
+            bank_name = re.sub(r"^(?:banco(?:\s+|$))+", "", op["bank_fields"]["bank_name"], flags=re.I)
+            borrower_title = op["borrower_title"]
+            # Earlier forms sent a personal title even for borrowers with a corporate suffix.
+            if COMPANY_SUFFIX.search(signer["name"]):
+                borrower_title = ""
             loan.update(op["bank_fields"], lender_name=company_name(op["entity"], "S.A."),
-                        borrower_intro=op["borrower_title"] + " ")
+                        bank_prefix="Banco " if bank_name else "Banco", bank_name=bank_name,
+                        borrower_intro=borrower_title + " " if borrower_title else "")
         if op["guarantee"]:
             person = op["guarantor"]
             treatment = op["guarantor_title"]
@@ -321,6 +333,8 @@ def word_pieces(op):
                                      bank=op["bank"], guarantee=op["guarantee"], detailed="capital" in portions[0])
     if notes:
         beneficiary = op["beneficiary"]
+        payment_address = op["payment_address"].removesuffix(".")
+        street_prefix = "" if STREET_TYPE.match(payment_address) else "calle "
         for index, row in enumerate(portions, 1):
             suffix = "S.A." if op["bank"] else "SA" if index == 1 else "SA."
             note = {**values, **payee_fields(beneficiary, suffix),
@@ -328,7 +342,7 @@ def word_pieces(op):
                     "number": str(index), "body_number": str(index), "number_words": number_words(index),
                     **amount_fields(row["note_amount"]), **date_fields(row["due"], "due"),
                     **date_fields(portions[0]["due"], "start"), **date_fields(portions[-1]["due"], "end"),
-                    "payment_address": op["payment_address"].removesuffix(".")}
+                    "street_prefix": street_prefix, "payment_address": payment_address}
             if op["bank"]:
                 # The transfer model spells this variable without the accent.
                 note["amount_words"] = note["amount_words"].replace("millón", "millon")
