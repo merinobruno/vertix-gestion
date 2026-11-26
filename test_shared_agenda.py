@@ -45,6 +45,9 @@ class SharedAgenda(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings.service_key, self.machine)
         self.assertEqual(action, "search")
         self.assertEqual((data["digits"], data["kind"]), ("00123456", "CUIT/CUIL"))
+        self.assertNotIn("dniOnly", data)
+        self.assertEqual((await self.post("search", {"query":"Ejemplo", "dni_only":True}))[0], 200)
+        self.assertEqual(forward.call_args.args[2], {"name":"ejemplo", "digits":"", "kind":"", "offset":0, "dniOnly":True})
         party = {"name":"Ficción", "id_type":"DNI", "id_number":"00123"}
         self.assertEqual((await self.post("save", {"party":party}))[0], 200)
         record = forward.call_args.args[2]["record"]

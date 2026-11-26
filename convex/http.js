@@ -34,6 +34,7 @@ async function list(ctx, data, suggestions) {
   if (!name && suggestions) return {parties:[]};
   const limit = suggestions ? 8 : 25;
   const filters = {name, digits, kind};
+  if (suggestions && data.dniOnly === true) filters.dniOnly = true;
   let {counts, groups} = await ranked(ctx, filters, [0,0,0], offset ? 0 : limit);
   const total = counts.reduce((sum, count) => sum + count, 0);
   if (offset && offset < total) {

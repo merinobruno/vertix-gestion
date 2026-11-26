@@ -197,6 +197,39 @@ class PartyDirectory(unittest.TestCase):
         self.assertEqual(len({p["id"] for p in page["parties"] + rest["parties"]}), 32)
         self.assertEqual(list_parties(self.path, "entidad 29")["parties"][0]["id_number"], "4.029")
 
+    def test_demand_note_search_filters_tax_identities_before_the_suggestion_limit(self):
+        for index in range(10):
+            save(self.path, dict(self.party, name=f"Ejemplo A{index}", id_type="CUIT/CUIL", id_number=f"00{index:09d}"))
+        person = save(self.path, dict(self.party, name="Ejemplo Z", id_type="DNI", id_number="00000987"))["party"]
+        with local_panel(self.path) as port:
+            for query in ("Ejemplo", "00"):
+                with self.subTest(query=query):
+                    def suggestions(**fields):
+                        status, result = request(port, "/api/agenda/search", {"query":query, **fields})
+                        self.assertEqual(status, 200)
+                        return result["parties"]
+
+                    unrestricted = suggestions(role="assignee")
+                    self.assertEqual(len(unrestricted), 8)
+                    self.assertNotIn(person, unrestricted)
+                    self.assertEqual(suggestions(role="demand", dni_only=True), [person])
+
+    def test_beneficiary_and_assignee_share_one_record_without_clearing_other_roles(self):
+        representative = dict(self.party, name="Representante", id_type="DNI", id_number="00.000.012")
+        profile = dict(self.party, name="Ficha compartida", borrower_representative=representative)
+        with local_panel(self.path) as port:
+            _, result = request(port, "/api/agenda/save", {"party":profile, "create_only":True, "role":"client"})
+            original = result["party"]
+            contact = {key:original[key] for key in ("name", "id_type", "id_number")}
+            for role in ("beneficiary", "assignee", "demand"):
+                with self.subTest(role=role):
+                    status, result = request(port, "/api/agenda/search", {"role":role, "query":"Ficha compartida"})
+                    self.assertEqual((status, result["parties"]), (200, [original]))
+                    status, _ = request(port, "/api/agenda/save", {"role":role, "party":contact, "create_only":True})
+                    self.assertEqual(status, 409)
+                    status, result = request(port, "/api/agenda/update", {"id":original["id"], "revision":original["revision"], "party":contact})
+                    self.assertEqual((status, result["party"]), (200, original))
+
     def test_combined_tax_identity_keeps_legacy_collisions_and_dni_separate(self):
         digits = "00123456789"
         first = save(self.path, dict(self.party, id_type="CUIT", id_number=digits))["party"]

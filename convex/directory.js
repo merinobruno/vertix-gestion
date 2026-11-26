@@ -73,11 +73,12 @@ export const importBatch = mutation({
 });
 
 export const scan = query({
-  args:{cursor:v.union(v.string(), v.null()), name:v.string(), digits:v.string(), kind:v.string()},
-  handler:async (ctx, {cursor, name, digits, kind}) => {
+  args:{cursor:v.union(v.string(), v.null()), name:v.string(), digits:v.string(), kind:v.string(), dniOnly:v.optional(v.boolean())},
+  handler:async (ctx, {cursor, name, digits, kind, dniOnly}) => {
     const page = await ctx.db.query("parties").withIndex("by_name").paginate({cursor, numItems:128});
     const rows = [];
     for (const row of page.page) {
+      if (dniOnly && row.kind !== "DNI") continue;
       const numberMatches = digits && (!kind || row.kind === kind) && row.digits.includes(digits);
       if (!row.nameKey.includes(name) && !numberMatches) continue;
       let rank = 2;

@@ -53,17 +53,17 @@ def as_record(row_id, encoded):
     return {"id": row_id, "revision": revision, **profile}
 
 
-def matches(path, query, limit, offset=0, *, count=False):
+def matches(path, query, limit, offset=0, *, count=False, dni_only=False):
     name = search_key(field(query, "la búsqueda", False))
     if not count and not name:
         return [], 0
     identifier = re.fullmatch(r"(?:(dni|cuit/cuil|cuit|cuil)[:#]?)?([0-9]+)", document_digits(name))
     number = identifier[2] if identifier else ""
     kind = id_group((identifier[1] or "").upper()) if identifier else ""
-    params = {"name":name, "number":number, "kind":kind, "limit":limit, "offset":offset}
-    criteria = """FROM parties WHERE instr(name_key, :name) > 0 OR
+    params = {"name":name, "number":number, "kind":kind, "limit":limit, "offset":offset, "dni_only":dni_only}
+    criteria = """FROM parties WHERE (:dni_only = 0 OR id_type = 'DNI') AND (instr(name_key, :name) > 0 OR
         (:number != '' AND (:kind = '' OR id_type = :kind OR
-         (:kind = 'CUIT/CUIL' AND id_type IN ('CUIT', 'CUIL'))) AND instr(document_key, :number) > 0)"""
+         (:kind = 'CUIT/CUIL' AND id_type IN ('CUIT', 'CUIL'))) AND instr(document_key, :number) > 0))"""
     order = """ORDER BY CASE WHEN document_key = :number THEN 0
                              WHEN instr(name_key, :name) = 1 OR (:number != '' AND instr(document_key, :number) = 1) THEN 1
                              ELSE 2 END, name_key, id LIMIT :limit OFFSET :offset"""
@@ -74,8 +74,8 @@ def matches(path, query, limit, offset=0, *, count=False):
         return [as_record(row_id, encoded) for row_id, encoded in rows], total
 
 
-def search(path, query):
-    return matches(path, query, 8)[0]
+def search(path, query, *, dni_only=False):
+    return matches(path, query, 8, dni_only=dni_only)[0]
 
 
 def list_parties(path, query, offset=0):

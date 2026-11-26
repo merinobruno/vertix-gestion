@@ -105,3 +105,22 @@ test("a page beyond the first internal batch covers all matches in rank and name
   assert.equal(result.body.parties.length,8);
   assert.equal(result.body.parties[0].id_number,"10");
 });
+
+test("demand note suggestions filter fiscal identities before the eight-result limit", async () => {
+  await db.run(async ctx => {
+    for (let i = 0; i < 10; i++) {
+      const digits = String(i).padStart(11,"0");
+      await ctx.db.insert("parties", {kind:"CUIT/CUIL", digits, nameKey:"ejemplo a" + i, revision:1,
+        profile:{name:"Ejemplo A" + i, id_type:"CUIT", id_number:digits}});
+    }
+    await ctx.db.insert("parties", {...record("00000987","Ejemplo Z"), revision:1});
+  });
+  for (const name of ["ejemplo", "00"]) {
+    const query = {name, digits:name === "00" ? name : "", kind:"", offset:0};
+    const unrestricted = (await post("search", query)).body.parties;
+    assert.equal(unrestricted.length,8);
+    assert.ok(unrestricted.every(p => p.id_type === "CUIT"));
+    const restricted = (await post("search", {...query, dniOnly:true})).body.parties;
+    assert.deepEqual(restricted.map(p => [p.id_type, p.id_number]), [["DNI", "00000987"]]);
+  }
+});

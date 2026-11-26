@@ -71,3 +71,20 @@ test("a real conflict offers both values without merging different representativ
     assert.deepEqual(party.lender_representative, preferSaved ? saved.lender_representative : draft.lender_representative);
   }
 });
+
+test("beneficiary and assignee update only the parts of a shared profile used in their form", () => {
+  const previous = {name:"Ficha", id_type:"DNI", id_number:"123", address:{street:"Original", number:"2"},
+    lender_representative:{name:"Anterior", id_type:"DNI", id_number:"5"}};
+  const saved = {...previous, name:"Ficha corregida", address:{street:"Corregida", number:"2"},
+    lender_representative:{name:"Siguiente", id_type:"DNI", id_number:"7"}};
+  const identity = {name:previous.name, id_type:"DNI", id_number:"123"};
+  for (const role of ["beneficiary", "assignee", "demand"]) {
+    const draft = role === "beneficiary" ? {...identity, address:{street:"Original", number:"8"}} : identity;
+    const {party, conflicts} = reconcileDirectoryDraft(previous, draft, saved, role);
+    assert.deepEqual(conflicts, []);
+    assert.equal(party.name, "Ficha corregida");
+    assert.deepEqual(party.address, role === "beneficiary" ? {street:"Corregida", number:"8", floor:"", apartment:"", locality:"", province:""} : saved.address);
+    assert.deepEqual(party.lender_representative, saved.lender_representative);
+    assert.deepEqual(fieldsFromReplacedParty(previous, {...identity, name:"Otra"}, true), ["id_number"]);
+  }
+});

@@ -115,7 +115,8 @@ class Panel(BaseHTTPRequestHandler):
             if not isinstance(request, dict):
                 raise ValueError("Los datos de la ficha son inválidos.")
             if path == "/api/agenda/search":
-                result = {"parties": party_directory.search(self.server.directory_path, request.get("query"))}
+                result = {"parties": party_directory.search(self.server.directory_path, request.get("query"),
+                                                            dni_only=request.get("dni_only") is True)}
             elif path == "/api/agenda/list":
                 result = party_directory.list_parties(self.server.directory_path, request.get("query"), request.get("offset", 0))
             elif path == "/api/agenda/update":

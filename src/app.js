@@ -1,5 +1,5 @@
 import {icon} from "./material.js";
-import {attachDirectory, directoryRequest} from "./party-directory.js";
+import {attachDirectory, directoryRequest, partyFieldName} from "./party-directory.js";
 import {setupAgenda} from "./agenda.js";
 import {addressFields, addressLine} from "./address.js";
 import {setupLegacyImport} from "./legacy-directory.js";
@@ -134,24 +134,27 @@ function createParty(group) {
   const key = group.dataset.party;
   const owner = group.closest("form");
   const natural = key === "representative" || key === "guarantor";
-  const useDirectory = key === "client" || key === "entity";
+  const useDirectory = !natural;
   if (!useDirectory) {
     appendField(group, natural ? "Nombre y apellido" : "Nombre o razón social",
       element("md-outlined-text-field", {name: key + ".name", pattern: ".{0,180}", required: true}), true);
   }
-  const types = element("md-outlined-select", {name: key + ".id_type"});
-  for (const id of [taxKind, "DNI"]) {
-    const option = element("md-select-option",{value:id});
-    if (id === (natural ? "DNI" : taxKind)) option.setAttribute("selected", "");
-    option.append(element("span",{slot:"headline",textContent:id}));
-    types.append(option);
+  let types;
+  if (key !== "demand") {
+    types = element("md-outlined-select", {name: key + ".id_type"});
+    for (const id of [taxKind, "DNI"]) {
+      const option = element("md-select-option",{value:id});
+      if (id === (natural ? "DNI" : taxKind)) option.setAttribute("selected", "");
+      option.append(element("span",{slot:"headline",textContent:id}));
+      types.append(option);
+    }
+    appendField(group, "Tipo de identificación", types);
   }
-  appendField(group, "Tipo de identificación", types);
   if (!useDirectory) {
     appendField(group, "Número de identificación",
       element("md-outlined-text-field", {name: key + ".id_number", pattern: ".{0,40}", required: true}));
   }
-  if (key !== "assignee") {
+  if (key !== "assignee" && key !== "demand") {
     const conditions = {client:"clientAddress", entity:"entityAddress", beneficiary:"beneficiaryAddress"};
     addAddress(group, key + ".address", "Domicilio", conditions[key]);
   }
@@ -160,7 +163,8 @@ function createParty(group) {
       directoryRequest,
       read:(includeHiddenAddress, previous) => {
         const party = readParty(key);
-        if (!includeHiddenAddress && control(key + ".address.street").disabled && !Object.values(party.address).some(Boolean)) delete party.address;
+        if (!includeHiddenAddress && party.address && control(key + ".address.street").disabled
+            && (key === "beneficiary" || !Object.values(party.address).some(Boolean))) delete party.address;
         if (key === "client" && (includeHiddenAddress || !control("represented").disabled)) {
           if (checked("represented")) party.borrower_representative = readParty("representative");
           else if (previous?.borrower_representative) party.borrower_representative = null;
@@ -177,7 +181,7 @@ function createParty(group) {
       clearRepresentative:() => { restoreRepresentative(key, {}); refresh(); },
     }));
   }
-  bindIdentification(types, owner.elements.namedItem(key + ".id_number"), natural ? "DNI" : taxKind, fieldError);
+  if (types) bindIdentification(types, owner.elements.namedItem(key + ".id_number"), natural ? "DNI" : taxKind, fieldError);
 }
 
 for (const group of document.querySelectorAll("[data-party]")) createParty(group);
@@ -406,15 +410,16 @@ function readAddress(prefix, owner = form) {
 }
 
 function readParty(key, owner = form) {
-  const party = {name:owner.elements.namedItem(key + ".name").value, ...readIdentification(owner.elements.namedItem(key + ".id_number"))};
-  if (key !== "assignee") party.address = readAddress(key + ".address", owner);
+  const party = {name:owner.elements.namedItem(partyFieldName(key, "name")).value,
+    ...readIdentification(owner.elements.namedItem(partyFieldName(key, "id_number")))};
+  if (owner.elements.namedItem(key + ".address.street")) party.address = readAddress(key + ".address", owner);
   return party;
 }
 
 function writeParty(key, party, owner = form) {
-  writeField(owner.elements.namedItem(key + ".name"), party.name ?? "");
-  writeIdentification(owner.elements.namedItem(key + ".id_number"), party);
-  if (key !== "assignee") restoreAddress(key + ".address", party.address, owner);
+  writeField(owner.elements.namedItem(partyFieldName(key, "name")), party.name ?? "");
+  writeIdentification(owner.elements.namedItem(partyFieldName(key, "id_number")), party);
+  if (owner.elements.namedItem(key + ".address.street")) restoreAddress(key + ".address", party.address, owner);
 }
 
 function readLenderRepresentative(owner) {
@@ -436,7 +441,7 @@ function restoreRepresentative(key, party) {
   if (key === "client") {
     control("represented").selected = Boolean(party.borrower_representative);
     writeParty("representative", party.borrower_representative ?? {id_type:"DNI"});
-  } else {
+  } else if (key === "entity") {
     writeLenderRepresentative(form, party.lender_representative);
   }
 }
@@ -545,11 +550,12 @@ function fieldError(field, message) {
 }
 
 function validateDirectoryParty(key) {
-  const address = readAddress(key + ".address");
-  if (control(key + ".address.street").disabled && Object.values(address).some(Boolean)
-      && ["street","number","locality","province"].some(field => !address[field])) {
-    statusMessage("Para guardar la ficha, completá o borrá el domicilio propio que empezaste a cargar en Partes.", true);
-    return false;
+  if ((key === "client" || key === "entity") && control(key + ".address.street").disabled) {
+    const address = readAddress(key + ".address");
+    if (Object.values(address).some(Boolean) && ["street","number","locality","province"].some(field => !address[field])) {
+      statusMessage("Para guardar la ficha, completá o borrá el domicilio propio que empezaste a cargar en Partes.", true);
+      return false;
+    }
   }
   const fields = partyKey => [...form.querySelector('[data-party="' + partyKey + '"]').querySelectorAll(editable)];
   const inputs = fields(key);
@@ -558,7 +564,7 @@ function validateDirectoryParty(key) {
   for (const field of inputs) {
     if (field.disabled) continue;
     let message = fieldProblem(field);
-    if (field.name === key + ".id_number" && !field.value.trim()) message = "Completá el número para guardar la ficha.";
+    if (field.name === partyFieldName(key, "id_number") && !field.value.trim() && !identificationProblem(field)) message = "Completá el número para guardar la ficha.";
     if (message) {
       fieldError(field, message);
       field.focus();

@@ -52,7 +52,10 @@ def prepared(action, body):
         offset = body.get("offset", 0) if action == "list" else 0
         if type(offset) is not int or not 0 <= offset <= 2**31 - 1:
             raise ValueError("La página de la agenda no es válida.")
-        return {"name": name, "digits": match[2] if match else "", "kind": id_group((match[1] or "").upper()) if match else "", "offset": offset}
+        data = {"name": name, "digits": match[2] if match else "", "kind": id_group((match[1] or "").upper()) if match else "", "offset": offset}
+        if action == "search" and body.get("dni_only") is True:
+            data["dniOnly"] = True
+        return data
     if action == "import":
         parties = body.get("parties")
         if not isinstance(parties, list) or not 1 <= len(parties) <= 25:

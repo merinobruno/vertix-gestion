@@ -1,4 +1,4 @@
-import {displayNumber, documentDigits, identificationGroup, writeIdentification} from "./identification.js";
+import {displayNumber, documentDigits, identificationGroup, numberProblem, writeIdentification} from "./identification.js";
 import {addressFields} from "./address.js";
 
 function identity(party) {
@@ -6,6 +6,11 @@ function identity(party) {
 }
 
 const clean = value => (value || "").trim().replace(/\s+/g, " ");
+
+export function partyFieldName(role, field) {
+  if (role === "demand") return field === "name" ? "demand_payee" : "demand_id";
+  return role + "." + field;
+}
 
 export function fieldsFromReplacedParty(previous, current, editingName) {
   const sameName = clean(current.name) === clean(previous.name);
@@ -32,7 +37,9 @@ export function reconcileDirectoryDraft(previous, draft, saved, role, preferSave
     return Object.fromEntries(Object.entries(addressFields).map(([key, caption]) => [key,
       pick(label + " · " + caption, old?.[key], current?.[key], next?.[key]) || ""]));
   }
-  const party = {...saved, address:address(previous.address, draft.address, saved.address, "Domicilio")};
+  const party = {...saved};
+  if (draft.address) party.address = address(previous.address, draft.address, saved.address, "Domicilio");
+  if (role !== "client" && role !== "entity") return {party, conflicts};
   const key = role === "client" ? "borrower_representative" : "lender_representative";
   const old = previous[key], current = draft[key], next = saved[key];
   if (old && current && next && identity(old) === identity(current) && identity(old) === identity(next)) {
@@ -64,21 +71,24 @@ export async function directoryRequest(action, payload, signal) {
 }
 
 export function attachDirectory(group, role, {read:readFields, apply, clearRepresentative, validate, directoryRequest, onSaved}) {
-  const noun = role === "client" ? "mutuario" : "mutuante";
+  const noun = {client:"mutuario", entity:"mutuante", beneficiary:"beneficiario", assignee:"cesionario", demand:"beneficiario"}[role];
+  const dniOnly = role === "demand";
+  const accepts = party => !dniOnly || (party.id_type === "DNI" && typeof party.id_number === "string" && !numberProblem("DNI", party.id_number));
   function lookupField(key, caption, max, wide) {
     const wrapper = node("div", {className:"native-field directory-name" + (wide ? " wide" : "")});
     const label = node("label", {className:"directory-label"});
-    const input = node("input", {name:role + "." + key, type:"text", required:true, pattern:".{0," + max + "}", autocomplete:"off"});
+    const input = node("input", {name:partyFieldName(role, key), type:"text", required:true, pattern:".{0," + max + "}", autocomplete:"off"});
     label.append(node("span", {textContent:caption}), input);
     wrapper.append(label);
     return [wrapper, input];
   }
-  const [nameWrapper, name] = lookupField("name", "Nombre o razón social", 180, true);
-  const [idWrapper, number] = lookupField("id_number", "Número de identificación", 40, false);
+  const [nameWrapper, name] = lookupField("name", dniOnly ? "Nombre y apellido" : "Nombre o razón social", 180, !dniOnly);
+  const [idWrapper, number] = lookupField("id_number", dniOnly ? "DNI" : "Número de identificación", 40, false);
   number.inputMode = "numeric";
   group.prepend(nameWrapper);
   const type = group.querySelector('[name$=".id_type"]');
-  type.after(idWrapper);
+  (type || nameWrapper).after(idWrapper);
+  if (dniOnly) number.dataset.idKind = "DNI";
   const list = node("ul", {className:"directory-options", id:"suggestions-" + role, hidden:true});
   list.setAttribute("role", "listbox");
   list.setAttribute("aria-label", "Fichas guardadas");
@@ -93,7 +103,7 @@ export function attachDirectory(group, role, {read:readFields, apply, clearRepre
   const feedback = node("span");
   feedback.setAttribute("role", "status");
   actions.append(button, feedback);
-  group.closest(".group").append(actions);
+  group.closest(".subgroup, .group").append(actions);
 
   let available = false;
   let timer = 0;
@@ -148,9 +158,11 @@ export function attachDirectory(group, role, {read:readFields, apply, clearRepre
     timer = setTimeout(async () => {
       timer = 0;
       try {
-        const {parties} = await directoryRequest("search", {role, query}, search.signal);
+        const params = {role, query};
+        if (dniOnly) params.dni_only = true;
+        const {parties} = await directoryRequest("search", params, search.signal);
         if (pending !== search || !visible() || input.value.trim() !== query || document.activeElement !== input) return;
-        records = parties;
+        records = parties.filter(accepts);
         for (const [index, party] of records.entries()) {
           const option = node("li", {id:list.id + "-" + party.id});
           option.setAttribute("role", "option");
@@ -191,7 +203,8 @@ export function attachDirectory(group, role, {read:readFields, apply, clearRepre
     version++;
     close();
     for (const key of fields) {
-      if (key === "id_number") writeIdentification(number, {id_type:type.value, id_number:""});
+      if (key === "id_number") writeIdentification(number, {id_type:type?.value || "DNI", id_number:""});
+      else if (key === "name") name.value = "";
       else group.querySelector('[name="' + role + "." + key + '"]').value = "";
     }
     clearRepresentative();
@@ -205,7 +218,7 @@ export function attachDirectory(group, role, {read:readFields, apply, clearRepre
     input.addEventListener("blur", close);
     input.addEventListener("keydown", browseSuggestions);
   }
-  type.addEventListener("change", () => detachOnChange(type));
+  type?.addEventListener("change", () => detachOnChange(type));
   list.addEventListener("mousedown", event => event.preventDefault());
   list.addEventListener("click", event => {
     const option = event.target.closest('[role="option"]');
@@ -261,7 +274,7 @@ export function attachDirectory(group, role, {read:readFields, apply, clearRepre
       close();
       available = enabled;
       actions.hidden = !enabled;
-      name.placeholder = enabled ? "Buscar por nombre, CUIT, CUIL o DNI" : "";
+      name.placeholder = enabled ? (dniOnly ? "Buscar por nombre o DNI" : "Buscar por nombre, CUIT, CUIL o DNI") : "";
       for (const input of [name, number]) {
         if (enabled) {
           input.setAttribute("role", "combobox");
@@ -292,6 +305,12 @@ export function attachDirectory(group, role, {read:readFields, apply, clearRepre
   function updated(saved) {
     if (!selected || selected.id !== saved.id || selected.revision === saved.revision) return;
     if (detachOnChange(name) || detachOnChange(type)) return;
+    if (!accepts(saved)) {
+      reset();
+      apply({name:saved.name, id_type:"DNI", id_number:""});
+      message("La ficha ya no tiene un DNI válido. Elegí otro beneficiario o completá su DNI.", true);
+      return;
+    }
     const draft = read(true);
     let merged = reconcileDirectoryDraft(selected, draft, saved, role);
     if (merged.conflicts.length && window.confirm("También editaste en esta operación (" + noun + ") "
