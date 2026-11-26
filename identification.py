@@ -14,7 +14,9 @@ def document_digits(number):
 
 
 def formatted_number(kind, number):
-    digits = document_digits(number)
+    # A single Excel cell may end in a line break. Internal line breaks and tabs separate cells.
+    value = re.sub(r"\r?\n\Z", "", number) if isinstance(number, str) else ""
+    digits = re.sub(r"[. \u00a0\u202f-]", "", value)
     if kind in TAX_TYPES:
         if not re.fullmatch(r"[0-9]{11}", digits):
             raise ValueError("El CUIT/CUIL debe tener 11 dígitos.")

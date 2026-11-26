@@ -34,6 +34,23 @@ def monetary(value, column, row, *, allow_zero=False):
     return amount
 
 
+def printed_amount(amount):
+    return f"{amount:,.2f}".translate(str.maketrans(",.", ".,"))
+
+
+def check_installment_total(total, capital, interest, vat, context):
+    components = capital + interest + vat
+    if total != components:
+        raise ValueError(f"Revisá {context}. Capital, interés e IVA suman ${printed_amount(components)} "
+                         f"y el importe de la cuota es ${printed_amount(total)}.")
+
+
+def check_loan_principal(principal, scheduled):
+    if principal != scheduled:
+        raise ValueError(f"El capital del préstamo (${printed_amount(principal)}) debe coincidir con "
+                         f"la suma del capital de las cuotas (${printed_amount(scheduled)}).")
+
+
 def note_amount(amount, percent):
     result = (amount * (1 + percent / 100)).quantize(CENT, rounding=ROUND_HALF_UP)
     if result > MAX_MONEY:
@@ -66,44 +83,51 @@ def read_section(rows, marker, formulas):
     note_columns = [i for i, title in enumerate(headers) if i >= left+6 and title == "PAGARE"]
     if len(note_columns) > 1:
         raise ValueError("El Anexo I contiene más de una columna PAGARÉ.")
-    note_formulas = {}
-    if note_columns:
-        col = note_columns[0]+1
-        for (cell,) in formulas.iter_rows(min_row=line+2, max_row=len(rows), min_col=col, max_col=col):
-            if cell.data_type == "f":
-                note_formulas[cell.row] = True
+    source = formulas.iter_rows(min_row=line+2, max_row=len(rows), min_col=left+1,
+                                max_col=(note_columns[0]+1 if note_columns else left+6))
     installments = []
+    totals = [Decimal(0)] * 4
     ended = False
-    for index in range(line+1, len(rows)):
-        record = rows[index]
+    for index, (record, cells) in enumerate(zip(rows[line+1:], source), line+1):
         number, due, capital, interest, vat, total = record[left:left+6]
         row = index + 1
-        # Totals have no installment number or date. Other worksheet blocks
-        # may follow the schedule and must never become installments.
         if label(number) in {"TOTAL", "TOTALES"}:
             break
+        has_amounts = any(cell.value is not None for cell in cells[2:6]) or bool(note_columns and cells[-1].value is not None)
         if number is None:
+            if label(due) == "NETO A LIQUIDAR":
+                break
             if due is not None:
-                try:
-                    due_date(due, row)
-                except ValueError:
-                    if not ended:
-                        raise ValueError(f"Falta el número de cuota o hay un vencimiento inválido en la fila {row}.") from None
-                else:
-                    raise ValueError(f"Falta el número de cuota en la fila {row}.")
+                if ended and not has_amounts and isinstance(due, str) and due.strip()[:1].isalpha():
+                    continue
+                raise ValueError(f"Falta el número de cuota en la fila {row}.")
+            if has_amounts:
+                # The legacy model identifies its unlabeled totals by the following NETO A LIQUIDAR.
+                if (installments and index+1 < len(rows) and label(rows[index+1][left+1]) == "NETO A LIQUIDAR"
+                        and all(isinstance(value, (float, int, Decimal)) for value in (capital, interest, vat, total))
+                        and [monetary(value, "TOTAL", row, allow_zero=True)
+                             for value in (capital, interest, vat, total)] == totals):
+                    break
+                raise ValueError(f"Hay importes sin número ni fecha de cuota en la fila {row} del Anexo I.")
             ended = True
             continue
-        if ended and isinstance(number, str) and not number.strip().isdigit():
-            break
+        if ended and not has_amounts and due is None and isinstance(number, str) and not number.strip().isdigit():
+            continue
         if ended or str(number).strip() != str(len(installments)+1):
             raise ValueError(f"Revisá el número de cuota en la fila {row}. Las cuotas deben comenzar en 1 y ser consecutivas.")
         if len(installments) == 60:
             raise ValueError("El Anexo I supera las 60 cuotas que admite el panel.")
+        due = due_date(due, row)
+        if installments and due < installments[-1]["due"]:
+            raise ValueError(f"El vencimiento de la fila {row} no puede ser anterior al de la cuota anterior.")
+        capital = monetary(capital, "CAPITAL", row, allow_zero=True)
+        interest = monetary(interest, "INTERES", row, allow_zero=True)
+        vat = monetary(vat, "IVA", row, allow_zero=True)
         amount = monetary(total, "CUOTA", row)
-        item = {"due": due_date(due, row), "amount": str(amount),
-                "capital": str(monetary(capital, "CAPITAL", row, allow_zero=True)),
-                "interest": str(monetary(interest, "INTERES", row, allow_zero=True)),
-                "vat": str(monetary(vat, "IVA", row, allow_zero=True)), "note_percent": "0"}
+        check_installment_total(amount, capital, interest, vat, f"la fila {row} del Anexo I")
+        totals = [a+b for a, b in zip(totals, (capital, interest, vat, amount))]
+        item = {"due": due, "amount": str(amount), "capital": str(capital), "interest": str(interest),
+                "vat": str(vat), "note_percent": "0"}
         if note_columns and record[note_columns[0]] is not None:
             expected = monetary(record[note_columns[0]], "PAGARÉ", row)
             percent = ((expected / amount - 1)*100).quantize(CENT, rounding=ROUND_HALF_UP)
@@ -111,20 +135,21 @@ def read_section(rows, marker, formulas):
                 item["note_percent"] = format(percent.normalize(), "f")
             else:
                 item.update(note_percent="", reference_note=str(expected))
-        elif row in note_formulas:
+        elif note_columns and cells[-1].data_type == "f":
             item.update(note_percent="", note_formula_missing=True)
         installments.append(item)
     if not installments:
         raise ValueError("El Anexo I no tiene cuotas.")
     principal = None
-    for row in rows[:start]:
-        for pos, value in enumerate(row[:-1]):
-            if label(value) == "IMPORTE" and isinstance(row[pos+1], (int, float)):
-                principal = str(monetary(row[pos+1], "IMPORTE", 1))
+    for row_no, record in enumerate(rows[:start], 1):
+        for pos, value in enumerate(record[:-1]):
+            if label(value) == "IMPORTE" and isinstance(record[pos+1], (int, float)):
+                principal = monetary(record[pos+1], "IMPORTE", row_no)
                 break
         if principal is not None:
+            check_loan_principal(principal, totals[0])
             break
-    return {"principal": principal, "installments": installments}
+    return {"principal": None if principal is None else str(principal), "installments": installments}
 
 
 def import_annex(data):

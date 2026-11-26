@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {beforeEach, test} from "node:test";
 import {IDBFactory, IDBKeyRange} from "fake-indexeddb";
 import {legacyPartyCount, legacyPartyPage} from "../src/legacy-directory.js";
-import {fieldsFromReplacedParty} from "../src/party-directory.js";
+import {fieldsFromReplacedParty, reconcileDirectoryDraft} from "../src/party-directory.js";
 
 beforeEach(() => { globalThis.indexedDB = new IDBFactory(); globalThis.IDBKeyRange = IDBKeyRange; });
 
@@ -39,4 +39,35 @@ test("a changed lookup discards the previous identity and only its untouched aut
   assert.equal(fieldsFromReplacedParty(previous, {...previous, id_number:"00123456"}, false), null);
   const tax = {...previous, id_type:"CUIL", id_number:"00-12345678-9"};
   assert.equal(fieldsFromReplacedParty(tax, {...tax, id_type:"CUIT/CUIL"}, false), null);
+});
+
+test("agenda saves update selected contact fields while preserving independent operation edits", () => {
+  const contact = {name:"Fixture", id_type:"DNI", id_number:"00.000.001", address:{street:"Calle Beta", number:"10"}};
+  const before = {...contact, borrower_representative:{...contact, name:"Representante"}};
+  const draft = {...before, address:{...before.address, number:"17"},
+    borrower_representative:{...before.borrower_representative, name:"Representante en borrador"}};
+  const saved = {...before, address:{...before.address, street:"Calle Corregida Beta"},
+    borrower_representative:{...before.borrower_representative, address:{street:"Nueva calle", number:"5"}}};
+  const {party, conflicts} = reconcileDirectoryDraft(before, draft, saved, "client");
+  assert.deepEqual(conflicts, []);
+  assert.equal(party.address.street, "Calle Corregida Beta");
+  assert.equal(party.address.number, "17");
+  assert.equal(party.borrower_representative.name, "Representante en borrador");
+  assert.equal(party.borrower_representative.address.street, "Nueva calle");
+});
+
+test("a real conflict offers both values without merging different representatives' identities", () => {
+  const contact = {name:"Fixture", id_type:"DNI", id_number:"1", address:{street:"Original", number:"1"}};
+  const before = {...contact, lender_representative:{...contact, title:"el Sr."}};
+  const draft = {...before, address:{street:"Borrador", number:"7"},
+    lender_representative:{...before.lender_representative, name:"Anterior corregido"}};
+  const saved = {...before, address:{street:"Agenda", number:"1"},
+    lender_representative:{name:"Nueva persona", id_type:"DNI", id_number:"2", title:"la Sra."}};
+  for (const preferSaved of [false, true]) {
+    const {party, conflicts} = reconcileDirectoryDraft(before, draft, saved, "entity", preferSaved);
+    assert.deepEqual(conflicts, ["Domicilio · Calle", "Representante"]);
+    assert.equal(party.address.street, preferSaved ? "Agenda" : "Borrador");
+    assert.equal(party.address.number, "7");
+    assert.deepEqual(party.lender_representative, preferSaved ? saved.lender_representative : draft.lender_representative);
+  }
 });

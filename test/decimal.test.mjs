@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {decimalValue, displayDecimal} from "../src/decimal.js";
+import {breakdownProblem, decimalValue, displayDecimal} from "../src/decimal.js";
 
 test("Excel amounts keep their cents and Argentine thousands separators", () => {
   for (const [raw, expected] of [
@@ -24,4 +24,15 @@ test("malformed data, extra precision and out-of-range amounts are rejected inta
     assert.equal(displayDecimal(raw, "money"), raw);
   }
   assert.equal(decimalValue("$ 5", "percent"), null);
+});
+
+test("a detailed installment and its principal reconcile to the printed cent", () => {
+  const rows = [{capital:"45000", interest:"5785.12", vat:"1214.88", amount:"52000"},
+    {capital:"45000", interest:"7438.02", vat:"1561.98", amount:"54000"}];
+  assert.equal(breakdownProblem(rows, "90000"), null);
+  assert.equal(breakdownProblem(rows, null), null);
+  assert.equal(breakdownProblem([{amount:"100"}], null), null);
+  assert.equal(breakdownProblem(rows, "1612000").field, "capital");
+  const problem = breakdownProblem([rows[0], {...rows[1], amount:"101.04"}], "90000");
+  assert.deepEqual([problem.index, problem.field], [1, "amount"]);
 });

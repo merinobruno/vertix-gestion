@@ -69,7 +69,7 @@
                 <md-outlined-text-field label="Número de cuenta" name="account_number" required></md-outlined-text-field>
                 <md-outlined-text-field label="CBU" name="cbu" inputmode="numeric" maxlength="22" pattern="[0-9]{22}" required></md-outlined-text-field>
                 <md-outlined-text-field label="Titular, si difiere del mutuante" name="account_holder"></md-outlined-text-field>
-                <md-outlined-text-field label="CUIT de ese titular" name="account_id"></md-outlined-text-field>
+                <md-outlined-text-field label="CUIT de ese titular" name="account_id" data-id-kind="CUIT"></md-outlined-text-field>
               </div></div>
             </div>
             <div class="tab-body" id="partes" role="tabpanel" aria-labelledby="tab-partes" hidden inert>
@@ -90,7 +90,7 @@
               </div>
               <div class="group" data-condition="demand"><h2>Beneficiario del pagaré a la vista</h2>
                 <div class="field-grid"><md-outlined-text-field label="Nombre y apellido" name="demand_payee" pattern=".{0,180}" required></md-outlined-text-field>
-                  <md-outlined-text-field label="DNI" name="demand_id" pattern=".{0,40}" required></md-outlined-text-field></div>
+                  <md-outlined-text-field label="DNI" name="demand_id" data-id-kind="DNI" required></md-outlined-text-field></div>
               </div>
               <div class="group" data-condition="transfer"><h2>Cesión</h2>
                 <label class="toggle"><md-switch name="different_assignee" aria-label="Cesionario distinto del mutuante"></md-switch>Cesionario distinto del mutuante</label>
@@ -134,7 +134,6 @@
           </dl>
           <ul id="file-list" aria-label="Documentos incluidos"></ul>
           <p class="notice draft" id="draft-notice" role="status" hidden></p>
-          <p class="notice" id="note-original" hidden>El segundo pagaré dice «uno (1)» en el cuerpo del original.</p>
           <fieldset id="format-options" class="format" hidden><legend>Formato</legend><div class="format-options">
             <label><md-radio name="format" value="docx" checked aria-label="Word"></md-radio>Word</label>
             <label><md-radio name="format" value="pdf" aria-label="PDF"></md-radio>PDF</label>

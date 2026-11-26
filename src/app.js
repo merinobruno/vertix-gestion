@@ -3,8 +3,8 @@ import {attachDirectory, directoryRequest} from "./party-directory.js";
 import {setupAgenda} from "./agenda.js";
 import {addressFields, addressLine} from "./address.js";
 import {setupLegacyImport} from "./legacy-directory.js";
-import {bindIdentification, identificationProblem, numberProblem, readIdentification, taxKind, writeIdentification} from "./identification.js";
-import {decimalValue, displayDecimal} from "./decimal.js";
+import {bindIdentification, identificationProblem, readIdentification, taxKind, writeIdentification} from "./identification.js";
+import {breakdownProblem, decimalValue, displayDecimal, minorUnits} from "./decimal.js";
 
 const form = document.querySelector("#operation");
 const byId = (id) => document.getElementById(id);
@@ -54,6 +54,8 @@ function writeField(field, value) {
     field.setCustomValidity("");
   } else if (field.dataset.decimal) {
     field.value = displayDecimal(value, field.dataset.decimal, operationCurrency());
+  } else if (field.dataset.idKind) {
+    writeIdentification(field, {id_type:field.dataset.idKind, id_number:value});
   } else {
     field.value = value;
   }
@@ -158,12 +160,12 @@ function createParty(group) {
       directoryRequest,
       read:(includeHiddenAddress, previous) => {
         const party = readParty(key);
-        if (!includeHiddenAddress && control(key + ".address.street").disabled) delete party.address;
-        if (key === "client" && !control("represented").disabled) {
+        if (!includeHiddenAddress && control(key + ".address.street").disabled && !Object.values(party.address).some(Boolean)) delete party.address;
+        if (key === "client" && (includeHiddenAddress || !control("represented").disabled)) {
           if (checked("represented")) party.borrower_representative = readParty("representative");
           else if (previous?.borrower_representative) party.borrower_representative = null;
         }
-        if (key === "entity" && !control("lender_rep_name").disabled) {
+        if (key === "entity" && (includeHiddenAddress || !control("lender_rep_name").disabled)) {
           if (lenderRepEntered()) party.lender_representative = readLenderRepresentative(form);
           else if (previous?.lender_representative) party.lender_representative = null;
         }
@@ -171,6 +173,7 @@ function createParty(group) {
       },
       validate:() => validateDirectoryParty(key),
       apply:party => { writeParty(key, party); restoreRepresentative(key, party); changed = true; refresh(); },
+      onSaved:refreshSelectedParty,
       clearRepresentative:() => { restoreRepresentative(key, {}); refresh(); },
     }));
   }
@@ -181,8 +184,12 @@ for (const group of document.querySelectorAll("[data-party]")) createParty(group
 addAddress(byId("payment-address"), "payment_address", "Domicilio de pago");
 for (const group of document.querySelectorAll("[data-lender-representative]")) {
   appendField(group, "Nombre y apellido", element("md-outlined-text-field", {name:"lender_rep_name", pattern:".{0,180}", required:true}));
-  appendField(group, "DNI", element("md-outlined-text-field", {name:"lender_rep_id", inputMode:"numeric", required:true}));
+  const id = appendField(group, "DNI", element("md-outlined-text-field", {name:"lender_rep_id", required:true}));
+  id.dataset.idKind = "DNI";
   group.dataset.treatment = "lender_rep_title";
+}
+for (const input of document.querySelectorAll("[data-id-kind]")) {
+  bindIdentification(null, input, input.dataset.idKind, fieldError);
 }
 for (const group of document.querySelectorAll("[data-treatment]")) {
   const name = group.dataset.treatment;
@@ -414,7 +421,7 @@ function readLenderRepresentative(owner) {
 
 function writeLenderRepresentative(owner, rep) {
   owner.elements.namedItem("lender_rep_name").value = rep?.name ?? "";
-  owner.elements.namedItem("lender_rep_id").value = rep?.id_number ?? "";
+  writeField(owner.elements.namedItem("lender_rep_id"), rep?.id_number ?? "");
   owner.elements.namedItem("lender_rep_title").value = rep?.title ?? "el Sr.";
 }
 
@@ -429,6 +436,10 @@ function restoreRepresentative(key, party) {
   } else {
     writeLenderRepresentative(form, party.lender_representative);
   }
+}
+
+function refreshSelectedParty(party) {
+  for (const directory of directories) directory.updated(party);
 }
 
 function payload(docs = selectedDocs()) {
@@ -449,11 +460,6 @@ function payload(docs = selectedDocs()) {
 
 function moneyFormat(currency) {
   return new Intl.NumberFormat("es-AR",{style:"currency",currency,currencyDisplay:"code",minimumFractionDigits:2});
-}
-
-function minorUnits(text) {
-  const match = /^(\d{1,12})(?:\.(\d{1,2}))?$/.exec(text);
-  return match ? BigInt(match[1])*100n + BigInt((match[2] || "").padEnd(2,"0")) : null;
 }
 
 function notePreview(amount, percent, fmt) {
@@ -479,15 +485,16 @@ function fieldProblem(field) {
   if (picker) {
     if (validity.valueMissing) return "Completá la fecha.";
     if (!validity.valid) return field.validationMessage;
-    if (picker.validity.rangeUnderflow) return "El vencimiento no puede ser anterior a la fecha de emisión.";
+    if (picker.validity.rangeUnderflow) return picker.value < valueOf("issue_date")
+      ? "El vencimiento no puede ser anterior a la fecha de emisión." : "El vencimiento no puede ser anterior al de la cuota anterior.";
     return "";
   }
+  const identification = identificationProblem(field);
+  if (identification) return identification;
   if (validity.badInput) return "Ingresá un número válido.";
   if (validity.valueMissing || (field.required && !field.value.trim())) {
     return field.localName === "md-outlined-select" ? "Elegí una opción." : "Completá este campo.";
   }
-  const identification = field.name === "lender_rep_id" && field.value ? numberProblem("DNI", field.value) : identificationProblem(field);
-  if (identification) return identification;
   if (field.dataset.decimal && field.value.trim()) {
     const value = decimalValue(field.value, field.dataset.decimal, operationCurrency());
     if (value === null) return "Ingresá un número con hasta dos decimales, por ejemplo 1.234,56.";
@@ -535,6 +542,12 @@ function fieldError(field, message) {
 }
 
 function validateDirectoryParty(key) {
+  const address = readAddress(key + ".address");
+  if (control(key + ".address.street").disabled && Object.values(address).some(Boolean)
+      && ["street","number","locality","province"].some(field => !address[field])) {
+    statusMessage("Para guardar la ficha, completá o borrá el domicilio propio que empezaste a cargar en Partes.", true);
+    return false;
+  }
   const fields = partyKey => [...form.querySelector('[data-party="' + partyKey + '"]').querySelectorAll(editable)];
   const inputs = fields(key);
   if (key === "client" && checked("represented")) inputs.push(...fields("representative"));
@@ -583,6 +596,14 @@ function validateThrough(lastPage) {
       issue("Agregá al menos una cuota.", lastPage, byId("add-installment"));
       return false;
     }
+    if (f.loan && f.independent) {
+      const problem = breakdownProblem(readRows("installments"), f.bankLoan ? valueOf("bank_principal") : null);
+      if (problem) {
+        const row = byId("installments").querySelectorAll(".row-card:not([data-removing])")[problem.index];
+        issue(problem.message, lastPage, row.querySelector('[data-field="' + problem.field + '"]'));
+        return false;
+      }
+    }
   }
   return true;
 }
@@ -612,6 +633,7 @@ function refresh() {
   const detailed = f.bankLoan || (f.loan && [...byId("installments").querySelectorAll(
     ".row-card:not([data-removing]) .row-breakdown [data-field]")].some(input => input.value !== ""));
   for (const kind of ["cheques","installments"]) {
+    let earliest = issueDate;
     for (const [index,row] of [...byId(kind).querySelectorAll(".row-card:not([data-removing])")].entries()) {
       const isCheque = kind === "cheques";
       const title = (isCheque ? "Cheque " : "Cuota ") + (index + 1);
@@ -623,7 +645,9 @@ function refresh() {
       const details = row.querySelector(".row-breakdown");
       if (details) details.hidden = !detailed;
       const due = row.querySelector('[data-field="due"]');
-      datePickers.get(due).min = f.credit && (isCheque ? f.linked : f.independent) ? issueDate : "";
+      const picker = datePickers.get(due);
+      picker.min = f.credit && (isCheque ? f.linked : f.independent) ? earliest : "";
+      if (picker.value > earliest) earliest = picker.value;
       const percentField = row.querySelector('[data-field="note_percent"]');
       percentField.hidden = !needsPercent;
       const preview = row.querySelector(".note-preview");
@@ -658,7 +682,6 @@ function refresh() {
   }
   const cheques = f.cheques ? readRows("cheques") : [];
   const portions = f.linked ? cheques : readRows("installments");
-  byId("note-original").hidden = f.bank || !f.notes || portions.length < 2;
   function totalText(rows) {
     const valid = rows.filter(r => r.amount !== "" && Number(r.amount) > 0);
     const cents = valid.reduce((sum,r) => sum+Math.round(Number(r.amount)*100),0);
@@ -728,13 +751,6 @@ function sample() {
   statusMessage("Ejemplo ficticio cargado.");
 }
 byId("example").addEventListener("click",sample);
-control("payment_method").addEventListener("change",() => {
-  if (valueOf("payment_method") === "bank") {
-    form.querySelector('md-checkbox[value="cesion"]').checked = false;
-  }
-  refresh();
-});
-
 function annexStatus(message, error = false) {
   for (const id of ["annex-status", "principal-annex-status"]) {
     const status = byId(id);
@@ -960,7 +976,7 @@ form.addEventListener("submit",async event => {
 });
 
 const agenda = setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest, readParty, writeParty,
-  readLenderRepresentative, writeLenderRepresentative});
+  readLenderRepresentative, writeLenderRepresentative, onSaved:refreshSelectedParty});
 const enableImport = setupLegacyImport(directoryRequest, agenda.reload);
 agenda.setAvailable(true);
 enableNumericDate(control("issue_date"));

@@ -7,7 +7,7 @@ import unicodedata
 from contextlib import closing
 from pathlib import Path
 
-from documents import address_text, field, title
+from documents import address_text, field, identification_field, title
 from identification import TAX_KIND, document_digits, formatted_number, id_group
 
 
@@ -92,7 +92,7 @@ def contact_identity(party):
     if len(name) > 180:
         raise ValueError("Usá hasta 180 caracteres en el nombre.")
     kind = party.get("id_type")
-    number = formatted_number(kind, field(party.get("id_number"), "el número de identificación"))
+    number = identification_field(party.get("id_number"), kind, "el número de identificación")
     return {"name": name, "id_type": kind, "id_number": number}
 
 

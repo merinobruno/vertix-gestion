@@ -229,7 +229,8 @@ class PartyDirectory(unittest.TestCase):
 
     def test_id_length_on_local_save_and_update(self):
         with local_panel(self.path) as port:
-            for kind, value in (("CUIT/CUIL", "1234"), ("CUIL", "123456789012"), ("DNI", "00123456789"), ("DNI", "doce")):
+            for kind, value in (("CUIT/CUIL", "1234"), ("CUIL", "123456789012"), ("DNI", "00123456789"),
+                                ("DNI", "doce"), ("CUIT/CUIL", "00\t850123456"), ("DNI", "00\n765432")):
                 with self.subTest(kind=kind, value=value):
                     status, _ = request(port, "/api/agenda/save", {"party":dict(self.party, id_type=kind, id_number=value)})
                     self.assertEqual(status, 422)

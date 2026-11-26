@@ -76,7 +76,8 @@ class WordModels(unittest.TestCase):
         data = operation()
         data["client"].update(id_type="DNI", id_number="00123456")
         self.assertEqual(parse(data)["client"]["id_number"], "00.123.456")
-        for kind, number in (("CUIT/CUIL", "12345678"), ("CUIT", "201234567890"), ("DNI", "20123456789")):
+        for kind, number in (("CUIT/CUIL", "12345678"), ("CUIT", "201234567890"), ("DNI", "20123456789"),
+                             ("CUIT/CUIL", "00\t850123456"), ("DNI", "00\n765432")):
             with self.subTest(kind=kind, number=number), self.assertRaisesRegex(ValueError, "dígitos"):
                 data["client"].update(id_type=kind, id_number=number)
                 parse(data)
@@ -134,6 +135,9 @@ class WordModels(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "cuota 2.*fecha de emisión"):
                     parse(data)
                 rows[1]["due"] = data["issue_date"]
+                with self.assertRaisesRegex(ValueError, "cuota 2.*cuota anterior"):
+                    parse(data)
+                rows[0]["due"] = data["issue_date"]
                 self.assertEqual(parse(data)["installments"][1]["due"].isoformat(), data["issue_date"])
         data = dict(operation(), documents=["cesion"])
         data["cheques"][0]["due"] = "2020-01-01"
@@ -173,7 +177,7 @@ class WordModels(unittest.TestCase):
         self.assert_source_layout(documents["cesion"], "assignment.docx")
         second = paragraph_text(body(documents["pagare-02-de-02"]))
         self.assertIn("NÚMERO (2) DE (2)", second)
-        self.assertIn("constituye el número uno (1) de dos (2)", second)
+        self.assertIn("constituye el número dos (2) de dos (2)", second)
         self.assertIn("emitidos el 19 de diciembre de 2026 hasta el 19 de enero de 2027", second)
 
     def test_extra_cheques_and_manual_installments_use_original_rows(self):
@@ -230,6 +234,10 @@ class WordModels(unittest.TestCase):
         self.assertIn("Ada Ejemplo D.N.I. N° 00.000.001", text)
         self.assertIn("dólares estadounidenses cuatro mil doscientos veinticinco con 23/100", text)
         self.assertIn("Pagadero en la Ciudad de Buenos Aires.", text)
+        self.assertEqual(parse(dict(data, demand_id="00000001"))["demand_id"], "00.000.001")
+        for bad in ("ABC", "12345678901", None, "123\t456"):
+            with self.subTest(value=bad), self.assertRaisesRegex(ValueError, "DNI"):
+                parse(dict(data, demand_id=bad))
         with self.assertRaises(ValueError):
             parse(dict(data, currency="ARS"))
         with self.assertRaises(ValueError):

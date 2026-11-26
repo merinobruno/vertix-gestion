@@ -1,7 +1,7 @@
 import {bindIdentification, displayNumber, readIdentification, taxKind, writeIdentification} from "./identification.js";
 
 export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError, directoryRequest, readParty, writeParty,
-  readLenderRepresentative, writeLenderRepresentative}) {
+  readLenderRepresentative, writeLenderRepresentative, onSaved}) {
   const byId = id => document.getElementById(id);
   const tabs = byId("workspace-tabs");
   const opTab = byId("tab-operation");
@@ -235,6 +235,7 @@ export function setupAgenda({addAddress, addressFields, fieldProblem, fieldError
         ? await directoryRequest("update", {id:selected.id, revision:selected.revision, party})
         : await directoryRequest("save", {create_only:true, party});
       if (editing === selected) returnToList(result.party);
+      onSaved(result.party);
     } catch (error) {
       if (editing === selected) editorMessage(error.message === "Failed to fetch" ? "No se pudo guardar la ficha." : error.message);
     } finally {

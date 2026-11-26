@@ -26,3 +26,25 @@ export function displayDecimal(raw, kind, currency) {
   const value = decimalValue(raw, kind, currency);
   return value === null ? String(raw) : value.replace(".", ",");
 }
+
+export function minorUnits(text) {
+  const match = /^(\d{1,12})(?:\.(\d{1,2}))?$/.exec(text);
+  return match ? BigInt(match[1])*100n + BigInt((match[2] || "").padEnd(2,"0")) : null;
+}
+
+export function breakdownProblem(rows, principal) {
+  if (!rows.some(row => row.capital || row.interest || row.vat)) return null;
+  let totalCapital = 0n;
+  for (const [index, row] of rows.entries()) {
+    const [amount, capital, interest, vat] = [row.amount, row.capital, row.interest, row.vat].map(minorUnits);
+    if ([amount, capital, interest, vat].includes(null)) return null; // Individual fields report invalid amounts.
+    if (capital + interest + vat !== amount) {
+      return {index, field:"amount", message:"El importe de la cuota " + (index+1) + " debe coincidir con la suma de capital, interés e IVA."};
+    }
+    totalCapital += capital;
+  }
+  if (principal != null && minorUnits(principal) !== totalCapital) {
+    return {index:0, field:"capital", message:"La suma del capital de las cuotas debe coincidir con el capital del préstamo."};
+  }
+  return null;
+}

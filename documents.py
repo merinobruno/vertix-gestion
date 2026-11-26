@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from annex import note_amount
+from annex import check_installment_total, check_loan_principal, note_amount, printed_amount
 from identification import formatted_number
 from word_pdf import pdf_batch
 from word_templates import assignment_document, demand_document, loan_document, note_document
@@ -75,6 +75,11 @@ def field(value, label, required=True):
     return value
 
 
+def identification_field(value, kind, label, required=True):
+    # Check required fields without flattening spreadsheet cell separators in the identity itself.
+    return formatted_number(kind, value) if field(value, label, required) else ""
+
+
 def calendar_day(value, label):
     try:
         if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
@@ -118,10 +123,8 @@ def address_text(value, label):
 def party(raw, label, *, address_required, id_required=True):
     if not isinstance(raw, dict):
         raw = {}
-    id_number = field(raw.get("id_number"), f"la identificación de {label}", id_required)
     kind = raw.get("id_type")
-    if id_number:
-        id_number = formatted_number(kind, id_number)
+    id_number = identification_field(raw.get("id_number"), kind, f"la identificación de {label}", id_required)
     return {"name": field(raw.get("name"), f"el nombre o la razón social de {label}"),
             "id_type": kind, "id_number": id_number,
             "address": address_text(raw.get("address"), f"domicilio de {label}") if address_required else ""}
@@ -143,6 +146,7 @@ def rows(raw, *, cheques, need_bank, notes=False, loan=False, detail=False):
         elif loan and (detail or any(item.get(k) not in (None, "") for k in ("capital", "interest", "vat"))):
             for key, caption in (("capital", "capital"), ("interest", "interés"), ("vat", "IVA")):
                 row[key] = money_value(item.get(key), f"{caption} de la cuota {i}", allow_zero=True)
+            check_installment_total(row["amount"], row["capital"], row["interest"], row["vat"], f"la cuota {i}")
         if notes:
             percent = money_value(item.get("note_percent", "0"), f"el porcentaje del pagaré {i}", allow_zero=True)
             row["note_amount"] = note_amount(row["amount"], percent)
@@ -162,7 +166,7 @@ def bank_fields(raw, entity):
     if not re.fullmatch(r"[0-9]{22}", cbu):
         raise ValueError("El CBU debe tener 22 dígitos.")
     holder = field(raw.get("account_holder"), "el titular de la cuenta", False)
-    holder_id = field(raw.get("account_id"), "el CUIT del titular de la cuenta", False)
+    holder_id = identification_field(raw.get("account_id"), "CUIT", "el CUIT del titular de la cuenta", False)
     if bool(holder) != bool(holder_id):
         raise ValueError("Completá el nombre y el CUIT del titular de la cuenta, o dejá ambos vacíos para usar los del mutuante.")
     return {"bank_name": field(raw.get("bank_name"), "el banco"), "cbu": cbu,
@@ -172,7 +176,7 @@ def bank_fields(raw, entity):
             "account_id": holder_id or entity["id_number"], "account_id_kind": "CUIT" if holder else entity["id_type"],
             "lender_rep_title": title(raw.get("lender_rep_title"), "el Sr."),
             "lender_rep_name": field(raw.get("lender_rep_name"), "quien representa al mutuante"),
-            "lender_rep_id": formatted_number("DNI", field(raw.get("lender_rep_id"), "el DNI de quien representa al mutuante"))}
+            "lender_rep_id": identification_field(raw.get("lender_rep_id"), "DNI", "el DNI de quien representa al mutuante")}
 
 
 def parse(raw):
@@ -231,7 +235,7 @@ def parse(raw):
         op["assignee"] = party(raw.get("assignee"), "la parte cesionaria", address_required=False) if raw.get("different_assignee") else entity
     if demand:
         op["demand_payee"] = field(raw.get("demand_payee"), "el nombre del beneficiario")
-        op["demand_id"] = field(raw.get("demand_id"), "el DNI del beneficiario")
+        op["demand_id"] = formatted_number("DNI", raw.get("demand_id", ""))
         op["demand_amount"] = money_value(raw.get("demand_amount"), "el importe del pagaré a la vista")
         op["demand_consideration"] = field(raw.get("demand_consideration"), "el concepto del valor recibido")
     op["linked"] = not bank and raw.get("installments_mode", "cheques") == "cheques"
@@ -243,8 +247,12 @@ def parse(raw):
         for index, installment in enumerate(op["installments"], 1):
             if installment["due"] < op["issue_date"]:
                 raise ValueError(f"El vencimiento de la cuota {index} no puede ser anterior a la fecha de emisión.")
+            if index > 1 and installment["due"] < op["installments"][index-2]["due"]:
+                raise ValueError(f"El vencimiento de la cuota {index} no puede ser anterior al de la cuota anterior.")
         if loan and any("capital" in r for r in op["installments"]) and not all("capital" in r for r in op["installments"]):
             raise ValueError("Completá capital, interés e IVA para todas las cuotas del Anexo I.")
+        if loan and bank:
+            check_loan_principal(op["net"], sum(row["capital"] for row in op["installments"]))
     return op
 
 
@@ -254,7 +262,7 @@ def date_fields(day, prefix):
 
 
 def amount_fields(amount):
-    return {"amount_digits": f"{amount:,.2f}".translate(str.maketrans(",.", ".,")),
+    return {"amount_digits": printed_amount(amount),
             "amount_words": number_words(int(amount)), "cents": f"{int((amount % 1) * 100):02d}"}
 
 
@@ -314,12 +322,10 @@ def word_pieces(op):
     if notes:
         beneficiary = op["beneficiary"]
         for index, row in enumerate(portions, 1):
-            # Both supplied bodies literally say "uno (1)"; the second heading says 2.
-            body_number = 1 if index == 2 and not op["bank"] else index
             suffix = "S.A." if op["bank"] else "SA" if index == 1 else "SA."
             note = {**values, **payee_fields(beneficiary, suffix),
                     "beneficiary_waiver": company_name(beneficiary, "S.A.").rstrip("."),
-                    "number": str(index), "body_number": str(body_number), "number_words": number_words(body_number),
+                    "number": str(index), "body_number": str(index), "number_words": number_words(index),
                     **amount_fields(row["note_amount"]), **date_fields(row["due"], "due"),
                     **date_fields(portions[0]["due"], "start"), **date_fields(portions[-1]["due"], "end"),
                     "payment_address": op["payment_address"].removesuffix(".")}

@@ -5,8 +5,9 @@ function identity(party) {
   return identificationGroup(party.id_type) + "/" + documentDigits(party.id_number);
 }
 
+const clean = value => (value || "").trim().replace(/\s+/g, " ");
+
 export function fieldsFromReplacedParty(previous, current, editingName) {
-  const clean = value => (value || "").trim().replace(/\s+/g, " ");
   const sameName = clean(current.name) === clean(previous.name);
   if (editingName ? sameName : identity(current) === identity(previous)) return null;
   const fields = [];
@@ -17,6 +18,35 @@ export function fieldsFromReplacedParty(previous, current, editingName) {
     if (oldValue && clean(current.address?.[key]) === oldValue) fields.push("address." + key);
   }
   return fields;
+}
+
+export function reconcileDirectoryDraft(previous, draft, saved, role, preferSaved = false) {
+  const conflicts = [];
+  function pick(label, old, current, next, normalize = clean) {
+    if (normalize(current) === normalize(old)) return next;
+    if (normalize(next) === normalize(old) || normalize(current) === normalize(next)) return current;
+    conflicts.push(label);
+    return preferSaved ? next : current;
+  }
+  function address(old, current, next, label) {
+    return Object.fromEntries(Object.entries(addressFields).map(([key, caption]) => [key,
+      pick(label + " · " + caption, old?.[key], current?.[key], next?.[key]) || ""]));
+  }
+  const party = {...saved, address:address(previous.address, draft.address, saved.address, "Domicilio")};
+  const key = role === "client" ? "borrower_representative" : "lender_representative";
+  const old = previous[key], current = draft[key], next = saved[key];
+  if (old && current && next && identity(old) === identity(current) && identity(old) === identity(next)) {
+    const rep = {...next, name:pick("Nombre del representante", old.name, current.name, next.name)};
+    if (role === "client") rep.address = address(old.address, current.address, next.address, "Representante");
+    else rep.title = pick("Tratamiento del representante", old.title, current.title, next.title);
+    party[key] = rep;
+  } else {
+    // A changed representative identity is indivisible: never mix two people's name and address.
+    const signature = rep => rep ? JSON.stringify([identity(rep), clean(rep.name), clean(rep.title),
+      ...Object.keys(addressFields).map(k => clean(rep.address?.[k]))]) : "";
+    party[key] = pick("Representante", old, current, next, signature);
+  }
+  return {party, conflicts};
 }
 
 function node(tag, properties = {}) {
@@ -33,7 +63,7 @@ export async function directoryRequest(action, payload, signal) {
   return result;
 }
 
-export function attachDirectory(group, role, {read:readFields, apply, clearRepresentative, validate, directoryRequest}) {
+export function attachDirectory(group, role, {read:readFields, apply, clearRepresentative, validate, directoryRequest, onSaved}) {
   const noun = role === "client" ? "mutuario" : "mutuante";
   function lookupField(key, caption, max, wide) {
     const wrapper = node("div", {className:"native-field directory-name" + (wide ? " wide" : "")});
@@ -147,6 +177,7 @@ export function attachDirectory(group, role, {read:readFields, apply, clearRepre
     const party = records[index];
     if (!party || !visible()) return;
     close();
+    version++;
     selected = party;
     apply(party);
     message("Ficha cargada.");
@@ -212,6 +243,7 @@ export function attachDirectory(group, role, {read:readFields, apply, clearRepre
         selected = result.party;
         message(result.created ? "Ficha guardada." : "Ficha actualizada.");
       } else if (revision === version) message("");
+      onSaved(result.party);
     } catch (error) {
       if (revision === version) {
         if (visible() && JSON.stringify(read()) === snapshot) {
@@ -257,5 +289,20 @@ export function attachDirectory(group, role, {read:readFields, apply, clearRepre
     selected = null;
     message("");
   }
-  return {sync, close, reset};
+  function updated(saved) {
+    if (!selected || selected.id !== saved.id || selected.revision === saved.revision) return;
+    if (detachOnChange(name) || detachOnChange(type)) return;
+    const draft = read(true);
+    let merged = reconcileDirectoryDraft(selected, draft, saved, role);
+    if (merged.conflicts.length && window.confirm("También editaste en esta operación (" + noun + ") "
+        + merged.conflicts.join(", ") + ". ¿Usar los cambios de Agenda en esos datos? Cancelar conserva los de esta operación.")) {
+      merged = reconcileDirectoryDraft(selected, draft, saved, role, true);
+    }
+    version++;
+    close();
+    selected = saved;
+    apply(merged.party);
+    message("Ficha actualizada en esta operación.");
+  }
+  return {sync, close, reset, updated};
 }

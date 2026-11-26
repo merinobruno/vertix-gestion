@@ -10,10 +10,10 @@ from test_word_models import body, example_address, operation, paragraph_text
 from word_templates import W
 
 
-def workbook(rows, *, note_header="PAGARÉ"):
+def workbook(rows, *, note_header="PAGARÉ", principal=None):
     book = Workbook()
     sheet = book.active
-    sheet.append(["Importe", 1612000])
+    sheet.append(["Importe", principal])
     sheet.append(["CUOTA", "FECHA", "SALDO", "CAPITAL", "SALDO CAPITAL", "INTERES", "IVA", "CUOTA"])
     sheet.append([1, date(2035, 3, 11), 400, 200, 200, 20, 4.2, 224.2])
     sheet.append(["ANEXO I"])
@@ -45,9 +45,16 @@ class Annex(unittest.TestCase):
         contract = body(dict(word_documents(parse(data)))["mutuo"])
         self.assertIn("Entidad Ficticia, CUIT 00-00000001-0, con domicilio", paragraph_text(contract[1]))
         self.assertNotIn("30-00000002-0", paragraph_text(contract[1]))
+        self.assertEqual(parse(dict(data, account_id="30000000020"))["bank_fields"]["account_id"], "30-00000002-0")
+        for bad in ("123", "ABC", "30\t00000002-0"):
+            with self.subTest(value=bad), self.assertRaisesRegex(ValueError, "11 dígitos"):
+                parse(dict(data, account_id=bad))
+        with self.assertRaisesRegex(ValueError, "DNI debe tener"):
+            parse(dict(data, lender_rep_id="00\t765432"))
 
     def test_imported_due_date_is_checked_against_the_contract(self):
         data = bank_operation()
+        data["net"] = "100"
         data["installments"] = import_annex(workbook([[1, "11/03/2035", 100, 0, 0, 100]]))["installments"]
         with self.assertRaisesRegex(ValueError, "cuota 1.*fecha de emisión"):
             parse(data)
@@ -59,7 +66,7 @@ class Annex(unittest.TestCase):
             [1, date(2035,4,12), 806000, 19325.3487, 4058.323227, 829383.671927, None, 1244075.5078905],
             [2, "12/05/2035", 806000, 0, 0, 806000, None, 806000],
             [None, None, 1612000, 19325.35, 4058.32, 1635383.67],
-            [None, "NETO A LIQUIDAR", 1580000]])
+            [None, "NETO A LIQUIDAR", 1580000]], principal=1612000)
         result = import_annex(data)
         self.assertEqual(result["principal"], "1612000.00")
         first, second = result["installments"]
@@ -85,6 +92,42 @@ class Annex(unittest.TestCase):
             import_annex(workbook([[1,"12/6/2035",100,0,0,100], [], [2,"12/7/2035",100,0,0,100]]))
         with self.assertRaisesRegex(ValueError, "xlsx"):
             import_annex(b"not an Excel file")
+
+    def test_partial_installments_cannot_disappear_before_totals(self):
+        for amount in (100, 813209.91, "=SUM(C7:E7)"):
+            with self.subTest(amount=amount), self.assertRaisesRegex(ValueError, "sin número ni fecha.*fila 7"):
+                import_annex(workbook([[1, "2035-04-12", 100, 0, 0, 100],
+                                       [None, None, 100, 0, 0, amount], ["TOTAL", None, 200, 0, 0, 200]]))
+        result = import_annex(workbook([[1, "2035-04-12", 100, 0, 0, 100], [], ["TOTALES"]], principal=100))
+        self.assertEqual(len(result["installments"]), 1)
+
+    def test_footer_text_after_a_separator_cannot_hide_more_installments(self):
+        rows = [[1, "2035-04-12", 100, 0, 0, 100], [], [None, "Observaciones de prueba"]]
+        self.assertEqual(len(import_annex(workbook(rows))["installments"]), 1)
+        for last, error in (([2, "2035-05-12", 100, 0, 0, 100], "consecutivas"),
+                            ([None, None, 100], "sin número ni fecha"),
+                            ([None, "12/05/2035"], "Falta el número")):
+            with self.subTest(last=last), self.assertRaisesRegex(ValueError, error):
+                import_annex(workbook([*rows, last]))
+
+    def test_read_and_generate_require_consistent_amounts_and_dates(self):
+        first = [1, "2035-04-12", 45000, 5785.12, 1214.88, 52000]
+        second = [2, "2035-05-12", 45000, 7438.02, 1561.98, 54000]
+        with self.assertRaisesRegex(ValueError, r"fila 6.*52\.000,00.*101,04"):
+            import_annex(workbook([first[:-1]+[101.04], second]))
+        with self.assertRaisesRegex(ValueError, r"capital del préstamo.*90\.000,00"):
+            import_annex(workbook([first, second], principal=1612000))
+        with self.assertRaisesRegex(ValueError, "fila 7.*anterior"):
+            import_annex(workbook([first, [2, "2035-03-12", *second[2:]]]))
+        data = bank_operation()
+        data["installments"] = import_annex(workbook([first, second], principal=90000))["installments"]
+        with self.assertRaisesRegex(ValueError, "capital del préstamo"):
+            parse(data)
+        data["net"] = "90000"
+        self.assertEqual(len(parse(data)["installments"]), 2)
+        data["installments"][0]["amount"] = "101.04"
+        with self.assertRaisesRegex(ValueError, r"cuota 1.*52\.000,00"):
+            parse(data)
 
     def test_payment_amount_changes_only_the_corresponding_note(self):
         data = bank_operation()
